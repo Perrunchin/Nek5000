@@ -284,6 +284,7 @@ rm -rf makefile 2>/dev/null
 
 sed -e "s:^FC[ ]*=.*:FC\:=$FC:" \
 -e "s:^CC[ ]*=.*:CC\:=$CC:" \
+-e "s:^CXX[ ]*=.*:CXX\:=$CXX:" \
 -e "s:^FFLAGS[ ]*=.*:FFLAGS\:=$FFLAGS:" \
 -e "s:^CFLAGS[ ]*=.*:CFLAGS\:=$CFLAGS:" \
 -e "s/^PPPO[ ]*=.*/PPPO=$PPPO/" \

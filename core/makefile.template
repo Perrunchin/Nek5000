@@ -11,6 +11,7 @@ CMT=0
 NEKNEK=
 FC=
 CC=
+CXX=
 FFLAGS=
 CFLAGS=
 PPPO=
@@ -20,6 +21,7 @@ USR_LFLAGS=
 VISIT=0
 VISIT_IFLAGS=
 VISIT_LFLAGS=
+PDBM=$S/pdbm
 
 ################################################################################
 
@@ -42,7 +44,8 @@ vprops.o makeq_aux.o \
 papi.o nek_in_situ.o \
 reader_rea.o reader_par.o reader_re2.o \
 finiparser.o iniparser.o dictionary.o \
-hpf.o
+hpf.o \
+breakpoint.o interface.o fem.o amg_preconditioner.o
 ################################################################################
 # MXM 
 MXM =  
@@ -106,6 +109,14 @@ cFL2   = $(L2) $(CFLAGS) $(PPS_C)
 cFL3   = $(L3) $(CFLAGS) $(PPS_C)
 
 ################################################################################
+# Hypre
+ifeq ($(findstring -g, $(CFLAGS)), -g)
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/debug
+else
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/opt
+endif
+
+################################################################################
 all : nek5000
 
 objdir: 
@@ -113,7 +124,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) $(FL2) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS)
+	$(FC) $(FL2) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(HYPRE_DIR)/lib -lHYPRE
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
@@ -239,6 +250,12 @@ $(OBJDIR)/mxm_bgq.o	  :$S/mxm_bgq.f;		$(FC) -c $(FL3) $< -o $@
 $(OBJDIR)/nek_comm.o             :$S/nek_comm.c;          $(CC) -c $(cFL2) $< -o $@
 $(OBJDIR)/byte.o                 :$S/byte.c;              $(CC) -c $(cFL2) $< -o $@
 $(OBJDIR)/chelpers.o             :$S/chelpers.c;          $(CC) -c $(cFL2) $< -o $@
+
+# AMG Preconditioner #########################################################################
+$(OBJDIR)/breakpoint.o           :$(PDBM)/breakpoint.c;             $(CC) -c $(cFL2) $< -o $@
+$(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
+$(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
+$(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
 
 # 3rd party #######################################################################################
 $(OBJDIR)/dsygv.o     	:$S/3rd_party/dsygv.f;  	$(FC) -c $(L0) $(PPS_F) $< -o $@
