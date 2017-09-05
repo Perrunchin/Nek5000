@@ -1,0 +1,11 @@
+*.o
+bin/genbox
+bin/genmap
+bin/n2to3
+bin/nekmerge
+bin/postex
+bin/postx
+bin/pretex
+bin/prex
+bin/re2torea
+bin/reatore2
