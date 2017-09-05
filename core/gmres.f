@@ -335,6 +335,12 @@ c     data    iflag,if_hyb  /.false. , .true. /
 
       real*8 etime1,dnekclock
 
+      ! AMG Preconditioner
+      logical use_amg
+
+      use_amg = .true.
+      !use_amg = .false.
+
 
       n = nx1*ny1*nz1*nelv
 
@@ -403,7 +409,12 @@ c . . . . . Overlapping Schwarz + coarse-grid . . . . . . .
 
 c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
             if (ifmgrid) then
-               call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
+               if (.not. use_amg) then
+                   call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
+                                                                !  j
+               else
+                   call amg_fem_preconditioner(z_gmres(1, j), w_gmres)
+               endif
             else                                            !  j
                kfldfdm = ndim+1
                if (param(100).eq.2) then
