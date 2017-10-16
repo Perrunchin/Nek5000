@@ -339,8 +339,6 @@ c     data    iflag,if_hyb  /.false. , .true. /
       logical use_amg
 
       use_amg = .true.
-      !use_amg = .false.
-
 
       n = nx1*ny1*nz1*nelv
 
@@ -367,6 +365,9 @@ c     data    iflag,if_hyb  /.false. , .true. /
 c
       iconv = 0
       call rzero(x_gmres,n)
+
+      call rand_fld_h1(res)
+      call col2(res, pmask, n)
 
       outer = 0
       do while (iconv.eq.0.and.iter.lt.500)
