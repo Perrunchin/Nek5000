@@ -19,6 +19,8 @@ extern long int max_rank;
 extern double* rhs;
 extern long int* rhs_index;
 extern int* indices;
+extern double lambda;
+extern int mapping;
 
 // Functions declaration
 extern "C"
@@ -29,6 +31,8 @@ extern "C"
     void set_global_numbering_(long int*);
     void set_pressure_mask_(double*);
     void compute_ranking_();
+    void set_lambda_(double&);
+    void set_mapping_(int&);
 
     // Memory management functions
     void free_global_memory();
