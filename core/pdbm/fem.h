@@ -45,6 +45,11 @@ void matrix_matrix_mul(double**, double**, double**, int, int, int, bool, bool);
 void matrix_scaling(double**, double, int, int);
 void row_scaling(double**, double**, double*, int, int);
 
+// Geometric functions
+double x_map(double, double);
+double y_map(double, double);
+double det_J_map(double, double);
+
 // Utility functions
 template<typename DataType>
 DataType* allocate_single_pointer(int);

@@ -217,8 +217,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
      * Computes the triangular elements from a rectangular mesh
      */
     // Allocate element array
-    //const int tri_per_elem = 2;
-    const int tri_per_elem = 4;
+    const int tri_per_elem = 2;
+    //const int tri_per_elem = 4;
 
     num_fem_elem = tri_per_elem * num_sub_elem;
 
@@ -230,8 +230,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
     }
 
     // Generate triangles
-    //int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
-    int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
+    int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
+    //int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
 
     for (int e = 0; e < num_sub_elem; e++)
     {
@@ -434,6 +434,9 @@ void fem_matrices(double** V, long int** E, int num_elements)
         matrix_matrix_mul(d_phi_inv_J, d_phi, inv_J, n_dim + 1, n_dim, n_dim, false, false);
         matrix_matrix_mul(A_loc, d_phi_inv_J, d_phi_inv_J, n_dim + 1, n_dim + 1, n_dim, false, true);
         matrix_scaling(A_loc, det_J * q_omega, n_dim + 1, n_dim + 1);
+        printf("Here\n");
+        print_matrix(J, n_dim, n_dim);
+//        exit(EXIT_SUCCESS);
 
         // Local mass matrix
         row_scaling(w_phi, phi, q_w, n_quad, n_dim + 1);
@@ -649,6 +652,61 @@ void fem_matrices(double** V, long int** E, int num_elements)
     free_double_pointer(d_phi, n_dim + 1);
     free_double_pointer(d_phi_inv_J, n_dim + 1);
     free_double_pointer(w_phi, n_dim + 1);
+}
+
+// Geometric functions
+double x_map(double r, double s)
+{
+    switch (mapping)
+    {
+        case 1:
+            // Parabola
+            return ((1.0 - lambda) * pow(s, 2.0) + lambda) * r;
+
+        case 2:
+            // Cosine
+            return ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s))) * r;
+
+        default:
+            // None
+            return r;
+    }
+}
+
+double y_map(double r, double s)
+{
+    switch (mapping)
+    {
+        case 1:
+            // Parabola
+            return s;
+
+        case 2:
+            // Cosine
+            return s;
+
+        default:
+            // None
+            return s;
+    }
+}
+
+double det_J_map(double r, double s)
+{
+    switch (mapping)
+    {
+        case 1:
+            // Parabola
+            return (1.0 - lambda) * pow(s, 2.0) + lambda;
+
+        case 2:
+            // Cosine
+            return (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s));
+
+        default:
+            // None
+            return 1.0;
+    }
 }
 
 // Math Functions
