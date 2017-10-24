@@ -108,11 +108,13 @@ cFL2   = $(L2) $(CFLAGS) $(PPS_C)
 cFL3   = $(L3) $(CFLAGS) $(PPS_C)
 
 ################################################################################
-# Hypre
+# Raptor
 ifeq ($(findstring -g, $(CFLAGS)), -g)
-	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/debug
+	RAPTOR_INC_DIR = /home/perrunchin/Programs/Raptor/raptor
+	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/dbg/lib
 else
-	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/opt
+	RAPTOR_INC_DIR = /home/perrunchin/Programs/Raptor/raptor
+	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/opt/lib
 endif
 
 ################################################################################
@@ -123,7 +125,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(HYPRE_DIR)/lib -lHYPRE
+	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(RAPTOR_LIB_DIR)/lib -lraptor
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
@@ -250,9 +252,9 @@ $(OBJDIR)/chelpers.o             :$S/chelpers.c;          $(CC) -c $(cFL2) $< -o
 
 # AMG Preconditioner #########################################################################
 $(OBJDIR)/breakpoint.o           :$(PDBM)/breakpoint.c;             $(CC) -c $(cFL2) $< -o $@
-$(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
-$(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
-$(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
+$(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
 
 # 3rd party #######################################################################################
 $(OBJDIR)/dsygv.o     	:$S/3rd_party/dsygv.f;  	$(FC) -c $(L0) $(PPS_F) $< -o $@
