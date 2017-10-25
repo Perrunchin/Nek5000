@@ -18,7 +18,6 @@ long int* glo_num = NULL;
 double* press_mask = NULL;
 long int* ranking = NULL;
 long int max_rank = 0;
-double* rhs = NULL;
 long int* rhs_index = NULL;
 int* indices = NULL;
 double lambda = 1.0;
@@ -116,9 +115,6 @@ void compute_ranking_()
     {
         max_rank += 1;
     }
-
-    // Allocate memory for rhs to be filled later
-    rhs = new double[max_rank];
 
     // Compute rhs indexing
     rhs_index = new long int[n_x * n_y * n_z * n_elem];

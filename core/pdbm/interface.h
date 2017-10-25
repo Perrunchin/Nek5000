@@ -16,7 +16,6 @@ extern long int* glo_num;
 extern double* press_mask;
 extern long int* ranking;
 extern long int max_rank;
-extern double* rhs;
 extern long int* rhs_index;
 extern int* indices;
 extern double lambda;

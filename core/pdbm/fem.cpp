@@ -7,27 +7,28 @@
 
 // C/C++ Headers
 #include <iostream>
+#include <fstream>
 #include <algorithm>
 #include <cmath>
 
-// Hypre Headers
-#include "_hypre_utilities.h"
-#include "HYPRE.h"
-#include "HYPRE_parcsr_ls.h"
+// Raptor Headers
+#include "core/matrix.hpp"
+#include "core/vector.hpp"
+
+// Namespaces
+using namespace raptor;
 
 // Global variables definition
-HYPRE_IJMatrix A_bc;
-HYPRE_ParCSRMatrix A_fem;
-HYPRE_IJMatrix B_bc;
-HYPRE_ParCSRMatrix B_fem;
-HYPRE_IJVector f_bc;
-HYPRE_ParVector f_fem;
-HYPRE_IJVector u_bc;
-HYPRE_ParVector u_fem;
-HYPRE_IJVector Bf_bc;
-HYPRE_ParVector Bf_fem;
-double* Binv_sem = NULL;
-double* Bd_fem = NULL;
+CSRMatrix *A_fem;
+CSRMatrix *B_fem;
+Vector f_bc;
+Vector f_fem;
+Vector u_bc;
+Vector u_fem;
+Vector Bf_bc;
+Vector Bf_fem;
+double *Binv_sem = NULL;
+double *Bd_fem = NULL;
 
 // Functions definition
 void assemble_fem_matrices_()
@@ -58,23 +59,9 @@ void assemble_fem_matrices_()
     fem_matrices(V_fem, E_fem, num_fem_elem);
 
     // Vectors
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &u_bc);
-    HYPRE_IJVectorSetObjectType(u_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(u_bc);
-    HYPRE_IJVectorAssemble(u_bc);
-    HYPRE_IJVectorGetObject(u_bc, (void**) &u_fem);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &f_bc);
-    HYPRE_IJVectorSetObjectType(f_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(f_bc);
-    HYPRE_IJVectorAssemble(f_bc);
-    HYPRE_IJVectorGetObject(f_bc, (void**) &f_fem);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &Bf_bc);
-    HYPRE_IJVectorSetObjectType(Bf_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(Bf_bc);
-    HYPRE_IJVectorAssemble(Bf_bc);
-    HYPRE_IJVectorGetObject(Bf_bc, (void**) &Bf_fem);
+    u_fem = Vector(max_rank);
+    f_fem = Vector(max_rank);
+    Bf_fem = Vector(max_rank);
 
     // Free memory
     free_double_pointer(V_sem, n_x * n_y * n_z * n_elem);
@@ -217,8 +204,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
      * Computes the triangular elements from a rectangular mesh
      */
     // Allocate element array
-    const int tri_per_elem = 2;
-    //const int tri_per_elem = 4;
+    //const int tri_per_elem = 2;
+    const int tri_per_elem = 4;
 
     num_fem_elem = tri_per_elem * num_sub_elem;
 
@@ -230,8 +217,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
     }
 
     // Generate triangles
-    int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
-    //int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
+    //int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
+    int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
 
     for (int e = 0; e < num_sub_elem; e++)
     {
@@ -291,15 +278,8 @@ void fem_matrices(double** V, long int** E, int num_elements)
     // Create full matrix
     int num_vertices = *std::max_element(glo_num, glo_num + n_x * n_y * n_z * n_elem) + 1;
 
-    HYPRE_IJMatrix A_full;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_vertices - 1, 0, num_vertices - 1, &A_full);
-    HYPRE_IJMatrixSetObjectType(A_full, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(A_full);
-
-    HYPRE_IJMatrix B_full;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_vertices - 1, 0, num_vertices - 1, &B_full);
-    HYPRE_IJMatrixSetObjectType(B_full, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_full);
+    COOMatrix *A_full = new COOMatrix(num_vertices, num_vertices);
+    COOMatrix *B_full = new COOMatrix(num_vertices, num_vertices);
 
     // FEM Variables
     double** elem_vert = allocate_double_pointer<double>(n_dim + 1, n_dim);
@@ -434,9 +414,6 @@ void fem_matrices(double** V, long int** E, int num_elements)
         matrix_matrix_mul(d_phi_inv_J, d_phi, inv_J, n_dim + 1, n_dim, n_dim, false, false);
         matrix_matrix_mul(A_loc, d_phi_inv_J, d_phi_inv_J, n_dim + 1, n_dim + 1, n_dim, false, true);
         matrix_scaling(A_loc, det_J * q_omega, n_dim + 1, n_dim + 1);
-        printf("Here\n");
-        print_matrix(J, n_dim, n_dim);
-//        exit(EXIT_SUCCESS);
 
         // Local mass matrix
         row_scaling(w_phi, phi, q_w, n_quad, n_dim + 1);
@@ -453,35 +430,22 @@ void fem_matrices(double** V, long int** E, int num_elements)
                 double A_val = A_loc[i][j];
                 double B_val = B_loc[i][j];
 
-                int ncols = 1;
-                int insert_error;
-
                 if (std::abs(A_val) > 1.0e-14)
                 {
-                    insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
+                    A_full->add_value(row, col, A_val);
                 }
 
                 if (std::abs(B_val) > 1.0e-14)
                 {
-                    insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
-                }
-
-                if (insert_error != 0)
-                {
-                    printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
-                    exit(EXIT_FAILURE);
+                    B_full->add_value(row, col, B_val);
                 }
             }
         }
     }
 
     // Assemble full matrix
-    HYPRE_IJMatrixAssemble(A_full);
-    HYPRE_IJMatrixAssemble(B_full);
-
-    //HYPRE_IJMatrixPrint(A_full, "A");
-
-    //exit(EXIT_SUCCESS);
+    A_full->remove_duplicates();
+    B_full->remove_duplicates();
 
     // Get index of glo_num
     std::vector<std::pair<long int, long int>> glo_num_pair;
@@ -511,109 +475,53 @@ void fem_matrices(double** V, long int** E, int num_elements)
     // Extract CRS arrays and apply Dirichlet boundary conditions
     long int num_rows = max_rank;
 
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &A_bc);
-    HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(A_bc);
+    COOMatrix *A_fem_coo = new COOMatrix(num_rows, num_rows);
 
-    HYPRE_ParCSRMatrix A_full_csr;
-    HYPRE_IJMatrixGetObject(A_full, (void**) &A_full_csr);
-
-    for (int i = 0; i < num_vertices; i++)
+    for (int i = 0; i < A_full->nnz; i++)
     {
-        int row = ranking[glo_num_index[i]];
+        int row = ranking[glo_num_index[A_full->idx1[i]]];
+        int col = ranking[glo_num_index[A_full->idx2[i]]];
 
-        if (row < num_rows)
+        if ((row < num_rows) and (col < num_rows))
         {
-            int ncols;
-            int* cols;
-            double* values;
-
-            HYPRE_ParCSRMatrixGetRow(A_full_csr, i, &ncols, &cols, &values);
-
-            for (int j = 0; j < ncols; j++)
-            {
-                int col = ranking[glo_num_index[cols[j]]];
-
-                if (col < num_rows)
-                {
-                    int num_cols = 1;
-                    int insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &num_cols, &row, &col, values + j);
-
-                    if (insert_error != 0)
-                    {
-                        printf("There was an error with entry A_fem(%d, %d) = %f\n", row, col, values[j]);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-            }
-
-            HYPRE_ParCSRMatrixRestoreRow(A_full_csr, i, &ncols, &cols, &values);
+            A_fem_coo->add_value(row, col, A_full->vals[i]);
         }
     }
 
-    HYPRE_IJMatrixAssemble(A_bc);
+    A_fem_coo->remove_duplicates();
+    A_fem = new CSRMatrix(A_fem_coo);
 
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &B_bc);
-    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_bc);
+    COOMatrix *B_fem_coo = new COOMatrix(num_rows, num_rows);
 
-    HYPRE_ParCSRMatrix B_full_csr;
-    HYPRE_IJMatrixGetObject(B_full, (void**) &B_full_csr);
-
-    for (int i = 0; i < num_vertices; i++)
+    for (int i = 0; i < B_full->nnz; i++)
     {
-        int row = ranking[glo_num_index[i]];
+        int row = ranking[glo_num_index[B_full->idx1[i]]];
+        int col = ranking[glo_num_index[B_full->idx2[i]]];
 
-        if (row < num_rows)
+        if ((row < num_rows) and (col < num_rows))
         {
-            int ncols;
-            int* cols;
-            double* values;
-
-            HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
-
-            for (int j = 0; j < ncols; j++)
-            {
-                int col = ranking[glo_num_index[cols[j]]];
-
-                if (col < num_rows)
-                {
-                    int num_cols = 1;
-                    int insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &num_cols, &row, &col, values + j);
-
-                    if (insert_error != 0)
-                    {
-                        printf("There was an error with entry B_fem(%d, %d) = %f\n", row, col, values[j]);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-            }
-
-            HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+            B_fem_coo->add_value(row, col, B_full->vals[i]);
         }
     }
 
-    HYPRE_IJMatrixAssemble(B_bc);
+    B_fem_coo->remove_duplicates();
+    B_fem = new CSRMatrix(B_fem_coo);
 
     // Build diagonal mass matrix with full mass matrix without boundary conditions
     double* Bd_sum = new double[num_vertices];
 
     for (int i = 0; i < num_vertices; i++)
     {
-        int ncols;
-        int* cols;
-        double* values;
-
-        HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
-
         Bd_sum[i] = 0.0;
+    }
 
-        for (int j = 0; j < ncols; j++)
-        {
-            Bd_sum[i] += values[j];
-        }
+    for (int i = 0; i < B_full->nnz; i++)
+    {
+        int row = B_full->idx1[i];
+        int col = B_full->idx2[i];
+        double val = B_full->vals[i];
 
-        HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+        Bd_sum[row] += val;
     }
 
     Bd_fem = new double[num_rows];
@@ -628,15 +536,11 @@ void fem_matrices(double** V, long int** E, int num_elements)
         }
     }
 
-    // Create ParCSR objects
-    HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
-    HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
-
-    //HYPRE_IJMatrixPrint(A_bc, "A_bc.pdbm");
-
     // Free memory
-    HYPRE_IJMatrixDestroy(A_full);
-    HYPRE_IJMatrixDestroy(B_full);
+    delete A_full;
+    delete B_full;
+    delete A_fem_coo;
+    delete B_fem_coo;
     delete[] glo_num_index;
     delete[] q_w;
     delete[] q_r;

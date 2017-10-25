@@ -6,11 +6,14 @@
 #ifndef AMG_PRECONDITIONER_H
 #define AMG_PRECONDITIONER_H
 
-// Hypre Headers
-#include "HYPRE.h"
+// Namespaces
+using namespace raptor;
+
+// Raptor Headers
+#include "multilevel/multilevel.hpp"
 
 // Global variables
-extern HYPRE_Solver amg_preconditioner;
+extern Multilevel *amg_preconditioner;
 
 extern "C"
 {

@@ -1,27 +1,25 @@
 /*
  * FEM functions declaration
  */
-// Hypre Headers
-#include "HYPRE.h"
-#include "HYPRE_parcsr_ls.h"
+// Raptor Headers
+#include "core/matrix.hpp"
+#include "core/vector.hpp"
+
+// Namespaces
+using namespace raptor;
 
 // Declarations
 #ifndef FEM_H
 #define FEM_H
 
 // Global variables declaration
-extern HYPRE_IJMatrix A_bc;
-extern HYPRE_ParCSRMatrix A_fem;
-extern HYPRE_IJMatrix B_bc;
-extern HYPRE_ParCSRMatrix B_fem;
-extern HYPRE_IJVector f_bc;
-extern HYPRE_ParVector f_fem;
-extern HYPRE_IJVector u_bc;
-extern HYPRE_ParVector u_fem;
-extern HYPRE_IJVector Bf_bc;
-extern HYPRE_ParVector Bf_fem;
-extern double* Binv_sem;
-extern double* Bd_fem;
+extern CSRMatrix *A_fem;
+extern CSRMatrix *B_fem;
+extern Vector f_fem;
+extern Vector u_fem;
+extern Vector Bf_fem;
+extern double *Binv_sem;
+extern double *Bd_fem;
 
 // Functions declaration
 extern "C"
