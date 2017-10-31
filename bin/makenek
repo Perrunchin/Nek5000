@@ -31,7 +31,7 @@ PPLIST=""
 #USR="foo.o"
 
 # MPI (default 1) 
-#MPI=0
+#NEK_USE_MPI=0
 
 # profiling (default 1)
 #PROFILING=0
@@ -49,7 +49,7 @@ PPLIST=""
 # DONT'T TOUCH WHAT FOLLOWS !!!
 ###############################################################################
 set -e
-: ${MPI:=1}
+: ${NEK_USE_MPI:=1}
 : ${PROFILING:=1}
 : ${VISIT:=0}
 
@@ -62,7 +62,7 @@ if [ -d $2 ] && [ $# -eq 2 ]; then
   echo "change source code directory to: ", $SOURCE_ROOT
 fi
 
-if [ $MPI -eq 0 ]; then
+if [ $NEK_USE_MPI -eq 0 ]; then
   gslib="gsserial" 
 else
   gslib="gs" 
@@ -74,10 +74,10 @@ source $SOURCE_ROOT/core/makenek.inc
 
 # compile gslib if needed
 if [ ! -f "$SOURCE_ROOT_GSLIB/lib$gslib.a" ]; then
-  make -j4 -B -C $SOURCE_ROOT_GSLIB MPI=0 CC="$CC" CFLAGS="$CFLAGS" ADDUS=$UNDERSCORE lib \
+  make -j4 -B -C $SOURCE_ROOT_GSLIB NEK_USE_MPI=0 CC="$CC" CFLAGS="$CFLAGS" ADDUS=$UNDERSCORE lib \
    2>&1 | tee compiler.out
-  if [ $MPI -ne 0 ]; then 
-    make -j4 -B -C $SOURCE_ROOT_GSLIB MPI=1 CC="$CC" CFLAGS="$CFLAGS" ADDUS=$UNDERSCORE lib \
+  if [ $NEK_USE_MPI -ne 0 ]; then
+    make -j4 -B -C $SOURCE_ROOT_GSLIB NEK_USE_MPI=1 CC="$CC" CFLAGS="$CFLAGS" ADDUS=$UNDERSCORE lib \
      2>&1 | tee compiler.out 
   fi
 fi
