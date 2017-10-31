@@ -176,11 +176,11 @@ case $F77comp in
 esac
 
 # set preprocessor symbols
-if [ $MPI -eq 0 ]; then
+if [ $NEK_USE_MPI -eq 0 ]; then
   PPLIST="${PPLIST} NOMPIIO"
 else
-  MPI=1
-  PPLIST="${PPLIST} MPI"
+  NEK_USE_MPI=1
+  PPLIST="${PPLIST} NEK_USE_MPI"
 fi
 
 if [ $UNDERSCORE -ne 0 ]; then
@@ -188,7 +188,7 @@ if [ $UNDERSCORE -ne 0 ]; then
 fi 
 
 if [ $PROFILING -ne 0 ]; then
-  if [ $MPI -ne 0 ]; then
+  if [ $NEK_USE_MPI -ne 0 ]; then
     PPLIST="${PPLIST} TIMER"
   else
     PPLIST="${PPLIST} TIMER"
@@ -239,7 +239,7 @@ sed -e "s:^FC[ ]*=.*:FC\:=$F77:" \
 -e "s/^PPS[ ]*=.*/PPS=$PPLIST/" \
 -e "s:^MXM[ ]*=.*:MXM=$MXM_USER:" \
 -e "s:^BLAS[ ]*=.*:BLAS=$BLAS:" \
--e "s/^MPI[ ]*=.*/MPI:=$MPI/" \
+-e "s/^NEK_USE_MPI[ ]*=.*/NEK_USE_MPI:=$NEK_USE_MPI/" \
 -e "s/^CMT[ ]*=.*/CMT:=$CMT/" \
 -e "s/^NEKNEK[ ]*=.*/NEKNEK:=$NEKNEK/" \
 -e "s/^VISIT[ ]*=.*/VISIT:=${VISIT}/" \
@@ -465,7 +465,7 @@ fi
 fi
 
 export NEK_WARN 
-export MPI
+export NEK_USE_MPI
 export FFLAGS
 export CFLAGS
 export UNDERSCORE
