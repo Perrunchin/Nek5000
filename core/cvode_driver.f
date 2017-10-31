@@ -121,7 +121,7 @@ c----------------------------------------------------------------------
 
       ! initialize vector module
       call create_comm(cvcomm)
-#ifdef MPI
+#ifdef NEK_USE_MPI
       call fnvinitp(cvcomm, 1, cv_nlocal, cv_nglobal, ier)
 #else
       call fnvinits(1, cv_nlocal, ier)

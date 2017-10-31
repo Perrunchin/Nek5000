@@ -30,7 +30,7 @@
 #USR="foo.o"
 
 # MPI (default 1) 
-#MPI=0
+#NEK_USE_MPI=0
 
 # profiling (default 1)
 #PROFILING=0
@@ -56,7 +56,7 @@ mver=17.0.4
 : ${SOURCE_ROOT:="$HOME/Nek5000"}
 : ${FC:="mpif77"}
 : ${CC:="mpicc"}
-: ${MPI:=1}
+: ${NEK_USE_MPI:=1}
 : ${PROFILING:=1}
 : ${VISIT:=0}
 
