@@ -6,7 +6,7 @@ S=
 SCMT=
 OPT_INCDIR=./
 OBJDIR=obj
-MPI=0 
+NEK_USE_MPI=0
 CMT=0 
 NEKNEK=
 FC=
@@ -60,7 +60,7 @@ NEKNEKO := multimesh.o
 endif
 
 COMM_MPI := comm_mpi.o
-ifeq ($(MPI),0)
+ifeq ($(NEK_USE_MPI),0)
   COMM_MPI := ${COMM_MPI} mpi_dummy.o
 endif
 
@@ -80,7 +80,7 @@ ifneq ($(VISIT),0)
   USR_LFLAGS := ${USR_LFLAGS} $(VISIT_LFLAGS)
 endif
 
-ifeq ($(MPI),0)
+ifeq ($(NEK_USE_MPI),0)
 	DUMMY:= $(shell cp $S/mpi_dummy.h $S/mpif.h) 
 else
 	DUMMY:= $(shell rm -rf $S/mpif.h) 
@@ -125,7 +125,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(RAPTOR_LIB_DIR) -lraptor -lblas -llapack
+	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(RAPTOR_LIB_DIR) -lmpi_cxx -lraptor -lblas -llapack
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
@@ -138,7 +138,7 @@ nek5000:	objdir $(NOBJS)
 	echo -e "\033[1;31;38m" "ERROR: Compilation failed!"; \
 	echo -e "\033[0m"; \
 	fi
-ifeq ($(MPI),0) 
+ifeq ($(NEK_USE_MPI),0)
 	@rm -rf $S/mpif.h
 endif
 
@@ -148,7 +148,7 @@ lib:	objdir $(NOBJS)
 
 clean:
 	rm -rf ${CASENAME}.f obj ${BINNAME}
-ifeq ($(MPI),0) 
+ifeq ($(NEK_USE_MPI),0)
 	@rm -rf $S/mpif.h
 endif
 
