@@ -11,16 +11,16 @@
 
 // Global variables definition
 int n_x = 0, n_y = 0, n_z = 0, n_elem = 0, n_dim = 0;
-double* x_m = NULL;
-double* y_m = NULL;
-double* z_m = NULL;
-long int* glo_num = NULL;
-double* press_mask = NULL;
-long int* ranking = NULL;
+double *x_m = NULL;
+double *y_m = NULL;
+double *z_m = NULL;
+long int *glo_num = NULL;
+double *press_mask = NULL;
+long int *ranking = NULL;
 long int max_rank = 0;
-double* rhs = NULL;
-long int* rhs_index = NULL;
-int* indices = NULL;
+double *rhs = NULL;
+long int *rhs_index = NULL;
+int *indices = NULL;
 double lambda = 1.0;
 int mapping = 0;
 
