@@ -20,8 +20,12 @@ extern HYPRE_IJVector u_bc;
 extern HYPRE_ParVector u_fem;
 extern HYPRE_IJVector Bf_bc;
 extern HYPRE_ParVector Bf_fem;
-extern double* Binv_sem;
-extern double* Bd_fem;
+extern double *Binv_sem;
+extern double *Bd_fem;
+extern int num_nodes;
+extern double *gll_nodes;
+extern double **phi;
+extern double **dphi;
 
 // Functions declaration
 extern "C"
@@ -36,9 +40,12 @@ void rectangular_to_triangular(long int**&, int&, long int**, int);
 void hexahedral_to_tetrahedral(long int**&, int&, long int**, int);
 
 // FEM Assembly
+void generate_basis();
 void fem_matrices(double**, long int**, int);
 
 // Math functions
+double distance(double *, double *, int);
+double interp(double, double *, double *, int);
 double determinant(double**, int);
 void inverse(double**&, double**, int, double);
 void matrix_matrix_mul(double**, double**, double**, int, int, int, bool, bool);
@@ -69,6 +76,5 @@ void free_double_pointer(PointerType&, int);
 void print_matrix(double**, int, int);
 void print_vertices(double**, int, int);
 void print_elements(long int**, int, int);
-//void save_matrix(std::string, Epetra_CrsMatrix*);
 
 #endif
