@@ -21,6 +21,8 @@ long int max_rank = 0;
 double* rhs = NULL;
 long int* rhs_index = NULL;
 int* indices = NULL;
+double lambda = 1.0;
+int mapping = 0;
 
 // Set functions
 void set_element_data_(int& n_x_, int& n_y_, int& n_z_, int& n_elem_, int& n_dim_)
@@ -139,6 +141,16 @@ void compute_ranking_()
     {
         indices[i] = i;
     }
+}
+
+void set_lambda_(double &lambda_)
+{
+    lambda = lambda_;
+}
+
+void set_mapping_(int &mapping_)
+{
+    mapping = mapping_;
 }
 
 // Memory management functions
