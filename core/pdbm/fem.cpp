@@ -440,6 +440,7 @@ void fem_matrices(double **V, long int **E, int num_elements)
             q_w[1] = 25.0 / 96.0;
             q_w[2] = 25.0 / 96.0;
             q_w[3] = 25.0 / 96.0;
+        }
     }
     else
     {
