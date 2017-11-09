@@ -7,6 +7,7 @@
 
 // C/C++ Headers
 #include <iostream>
+#include <functional>
 #include <fstream>
 #include <algorithm>
 #include <cmath>
@@ -31,8 +32,8 @@ double *Binv_sem;
 double *Bd_fem;
 int num_nodes;
 double *gll_nodes;
-double **phi;
-double **dphi;
+std::vector<std::function<double (double, double)>> phi;
+std::vector<std::function<void (double *, double,  double)>> dphi;
 
 // Functions definition
 void assemble_fem_matrices_()
@@ -341,88 +342,17 @@ void generate_basis()
         gll_nodes[i] = gll_nodes_temp[i];
     }
 
-    delete [] gll_nodes_temp;
+    free_single_pointer(gll_nodes_temp);
+    free_double_pointer(P, num_nodes);
 
-    // Basis functions and derivatives at the GLL nodes
-    phi = allocate_double_pointer<double>(num_nodes, num_nodes);
-    dphi = allocate_double_pointer<double>(num_nodes, num_nodes);
+    // Functions
+    phi.push_back([] (double r, double s) { return r; });
+    phi.push_back([] (double r, double s) { return s; });
+    phi.push_back([] (double r, double s) { return 1.0 - r - s; });
 
-    for (int i = 0; i < num_nodes; i++)
-    {
-        // Lagrange interpolant
-        for (int j = 0; j < num_nodes; j++)
-        {
-            if (i == j)
-            {
-                phi[i][j] = 1.0;
-            }
-            else
-            {
-                phi[i][j] = 0.0;
-            }
-        }
-
-        // Derivative of Lagrange interpolant
-        for (int j = 0; j < num_nodes; j++)
-        {
-            dphi[i][j] = 0.0;
-
-            for (int k = 0; k < num_nodes; k++)
-            {
-                if (k == i)
-                {
-                    continue;
-                }
-
-                double ell_p = 1.0 / (gll_nodes[i] - gll_nodes[k]);
-
-                for (int l = 0; l < num_nodes; l++)
-                {
-                    if ((l == i) or (l == k))
-                    {
-                        continue;
-                    }
-
-                    ell_p *= (gll_nodes[j] - gll_nodes[l]) / (gll_nodes[i] - gll_nodes[l]);
-                }
-
-                dphi[i][j] += ell_p;
-            }
-        }
-    }
-
-    int n = 100;
-    std::ofstream file;
-    file.open("phi.dat");
-
-    for (int i = 0; i < num_nodes; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            double x_p = - 1.0 + (2.0 / (n - 1.0)) * j;
-            file << interp(x_p, gll_nodes, phi[i], num_nodes) << " ";
-        }
-
-        file << std::endl;
-    }
-
-    file.close();
-    file.open("dphi.dat");
-
-    for (int i = 0; i < num_nodes; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            double x_p = - 1.0 + (2.0 / (n - 1.0)) * j;
-            file << interp(x_p, gll_nodes, dphi[i], num_nodes) << " ";
-        }
-
-        file << std::endl;
-    }
-
-    file.close();
-
-    exit(EXIT_SUCCESS);
+    dphi.push_back([] (double *dp, double r, double s) { dp[0] = 1.0; dp[1] = 0.0; });
+    dphi.push_back([] (double *dp, double r, double s) { dp[0] = 0.0; dp[1] = 1.0; });
+    dphi.push_back([] (double *dp, double r, double s) { dp[0] = -1.0; dp[1] = -1.0; });
 }
 
 void fem_matrices(double **V, long int **E, int num_elements)
@@ -446,12 +376,13 @@ void fem_matrices(double **V, long int **E, int num_elements)
     HYPRE_IJMatrixInitialize(B_full);
 
     // FEM Variables
-    double** elem_vert = allocate_double_pointer<double>(n_dim + 1, n_dim);
-    double** A_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** B_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** J = allocate_double_pointer<double>(n_dim, n_dim);
-    double** inv_J = allocate_double_pointer<double>(n_dim, n_dim);
-    double det_J;
+    double **A_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
+    double **B_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
+    double **J_pr = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_rp = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_xp = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_px = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_xr = allocate_double_pointer<double>(n_dim, n_dim);
 
     // Quadrature rule
     int n_quad;
@@ -459,7 +390,6 @@ void fem_matrices(double **V, long int **E, int num_elements)
     double* q_s;
     double* q_t;
     double* q_w;
-    double q_omega;
 
     if (n_dim == 2)
     {
@@ -484,8 +414,6 @@ void fem_matrices(double **V, long int **E, int num_elements)
         q_w[0] = 1.0 / 6.0;
         q_w[1] = 1.0 / 6.0;
         q_w[2] = 1.0 / 6.0;
-
-        q_omega = 1.0 / 2.0;
     }
     else
     {
@@ -517,344 +445,479 @@ void fem_matrices(double **V, long int **E, int num_elements)
         q_w[1] = 1.0 / 24.0;
         q_w[2] = 1.0 / 24.0;
         q_w[3] = 1.0 / 24.0;
-
-        q_omega = 1.0 / 6.0;
-    }
-
-    // Basis functions derivatives
-    double** phi = allocate_double_pointer<double>(n_quad, n_dim + 1, 0.0);
-    double** d_phi = allocate_double_pointer<double>(n_dim + 1, n_dim, 0.0);
-    double** d_phi_inv_J = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** w_phi = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-
-    for (int k = 0; k < n_dim; k++)
-    {
-        d_phi[k][k] = 1.0;
-        d_phi[n_dim][k] = -1.0;
-    }
-
-    for (int k = 0; k < n_quad; k++)
-    {
-        if (n_dim == 2)
-        {
-            phi[k][0] = q_r[k];
-            phi[k][1] = q_s[k];
-            phi[k][2] = 1.0 - q_r[k] - q_s[k];
-        }
-        else
-        {
-            phi[k][0] = q_r[k];
-            phi[k][1] = q_s[k];
-            phi[k][2] = q_t[k];
-            phi[k][3] = 1.0 - q_r[k] - q_s[k] - q_t[k];
-        }
     }
 
     // FEM Assembly process
-//    for (int e = 0; e < num_elements; e++)
-//    {
-//        // Element vertices
-//        for (int i = 0; i < n_dim + 1; i++)
-//        {
-//            for (int j = 0; j < n_dim; j++)
-//            {
-//                elem_vert[i][j] = V[E[e][i]][j];
-//            }
-//        }
-//
-//        // Jacobian
-//        for (int i = 0; i < n_dim; i++)
-//        {
-//            for (int j = 0; j < n_dim; j++)
-//            {
-//                J[i][j] = elem_vert[j][i] - elem_vert[n_dim][i];
-//                printf("%f\t", J[i][j]);
-//            }
-//            printf("\n");
-//        }
-//
-//        exit(EXIT_SUCCESS);
-//
-//        det_J = determinant(J, n_dim);
-//        inverse(inv_J, J, n_dim, det_J);
-//
-//        // Local stiffness matrix
-//        matrix_matrix_mul(d_phi_inv_J, d_phi, inv_J, n_dim + 1, n_dim, n_dim, false, false);
-//        matrix_matrix_mul(A_loc, d_phi_inv_J, d_phi_inv_J, n_dim + 1, n_dim + 1, n_dim, false, true);
-//        matrix_scaling(A_loc, det_J * q_omega, n_dim + 1, n_dim + 1);
-//        printf("Here\n");
-//        print_matrix(J, n_dim, n_dim);
-////        exit(EXIT_SUCCESS);
-//
-//        // Local mass matrix
-//        row_scaling(w_phi, phi, q_w, n_quad, n_dim + 1);
-//        matrix_matrix_mul(B_loc, phi, w_phi, n_dim + 1, n_dim + 1, n_quad, true, false);
-//        matrix_scaling(B_loc, det_J, n_dim + 1, n_dim + 1);
-//
-//        // Add to global matrix
-//        for (int i = 0; i < n_dim + 1; i++)
-//        {
-//            for (int j = 0; j < n_dim + 1; j++)
-//            {
-//                int row = glo_num[E[e][i]];
-//                int col = glo_num[E[e][j]];
-//                double A_val = A_loc[i][j];
-//                double B_val = B_loc[i][j];
-//
-//                int ncols = 1;
-//                int insert_error;
-//
-//                if (std::abs(A_val) > 1.0e-14)
-//                {
-//                    insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
-//                }
-//
-//                if (std::abs(B_val) > 1.0e-14)
-//                {
-//                    insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
-//                }
-//
-//                if (insert_error != 0)
-//                {
-//                    printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
-//                    exit(EXIT_FAILURE);
-//                }
-//            }
-//        }
-//    }
-//
-//    // Assemble full matrix
-//    HYPRE_IJMatrixAssemble(A_full);
-//    HYPRE_IJMatrixAssemble(B_full);
-//
-//    //HYPRE_IJMatrixPrint(A_full, "A");
-//
-//    //exit(EXIT_SUCCESS);
-//
-//    // Get index of glo_num
-//    std::vector<std::pair<long int, long int>> glo_num_pair;
-//
-//    for (int i = 0; i < n_x * n_y * n_z * n_elem; i++)
-//    {
-//        glo_num_pair.push_back(std::pair<long int, long int>(glo_num[i], i));
-//    }
-//
-//    std::sort(glo_num_pair.begin(), glo_num_pair.end());
-//
-//    int id = 1;
-//    long int* glo_num_index = new long int[num_vertices]; // Vertex "i" is in position "glo_num_index[i]" in "glo_num"
-//
-//    glo_num_index[0] = glo_num_pair[0].second;
-//
-//    for (int i = 1; i < n_x * n_y * n_z * n_elem; i++)
-//    {
-//        if (glo_num_pair[i - 1].first != glo_num_pair[i].first)
-//        {
-//            glo_num_index[id] = glo_num_pair[i].second;
-//
-//            id++;
-//        }
-//    }
-//
-//    // Extract CRS arrays and apply Dirichlet boundary conditions
-//    long int num_rows = max_rank;
-//
-//    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &A_bc);
-//    HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
-//    HYPRE_IJMatrixInitialize(A_bc);
-//
-//    HYPRE_ParCSRMatrix A_full_csr;
-//    HYPRE_IJMatrixGetObject(A_full, (void**) &A_full_csr);
-//
-//    for (int i = 0; i < num_vertices; i++)
-//    {
-//        int row = ranking[glo_num_index[i]];
-//
-//        if (row < num_rows)
-//        {
-//            int ncols;
-//            int* cols;
-//            double* values;
-//
-//            HYPRE_ParCSRMatrixGetRow(A_full_csr, i, &ncols, &cols, &values);
-//
-//            for (int j = 0; j < ncols; j++)
-//            {
-//                int col = ranking[glo_num_index[cols[j]]];
-//
-//                if (col < num_rows)
-//                {
-//                    int num_cols = 1;
-//                    int insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &num_cols, &row, &col, values + j);
-//
-//                    if (insert_error != 0)
-//                    {
-//                        printf("There was an error with entry A_fem(%d, %d) = %f\n", row, col, values[j]);
-//                        exit(EXIT_FAILURE);
-//                    }
-//                }
-//            }
-//
-//            HYPRE_ParCSRMatrixRestoreRow(A_full_csr, i, &ncols, &cols, &values);
-//        }
-//    }
-//
-//    HYPRE_IJMatrixAssemble(A_bc);
-//
-//    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &B_bc);
-//    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
-//    HYPRE_IJMatrixInitialize(B_bc);
-//
-//    HYPRE_ParCSRMatrix B_full_csr;
-//    HYPRE_IJMatrixGetObject(B_full, (void**) &B_full_csr);
-//
-//    for (int i = 0; i < num_vertices; i++)
-//    {
-//        int row = ranking[glo_num_index[i]];
-//
-//        if (row < num_rows)
-//        {
-//            int ncols;
-//            int* cols;
-//            double* values;
-//
-//            HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
-//
-//            for (int j = 0; j < ncols; j++)
-//            {
-//                int col = ranking[glo_num_index[cols[j]]];
-//
-//                if (col < num_rows)
-//                {
-//                    int num_cols = 1;
-//                    int insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &num_cols, &row, &col, values + j);
-//
-//                    if (insert_error != 0)
-//                    {
-//                        printf("There was an error with entry B_fem(%d, %d) = %f\n", row, col, values[j]);
-//                        exit(EXIT_FAILURE);
-//                    }
-//                }
-//            }
-//
-//            HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
-//        }
-//    }
-//
-//    HYPRE_IJMatrixAssemble(B_bc);
-//
-//    // Build diagonal mass matrix with full mass matrix without boundary conditions
-//    double* Bd_sum = new double[num_vertices];
-//
-//    for (int i = 0; i < num_vertices; i++)
-//    {
-//        int ncols;
-//        int* cols;
-//        double* values;
-//
-//        HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
-//
-//        Bd_sum[i] = 0.0;
-//
-//        for (int j = 0; j < ncols; j++)
-//        {
-//            Bd_sum[i] += values[j];
-//        }
-//
-//        HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
-//    }
-//
-//    Bd_fem = new double[num_rows];
-//
-//    for (int i = 0; i < num_vertices; i++)
-//    {
-//        int row = ranking[glo_num_index[i]];
-//
-//        if (row < num_rows)
-//        {
-//            Bd_fem[row] = Bd_sum[i];
-//        }
-//    }
-//
-//    // Create ParCSR objects
-//    HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
-//    HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
-//
-//    //HYPRE_IJMatrixPrint(A_bc, "A_bc.pdbm");
-//
-//    // Free memory
-//    HYPRE_IJMatrixDestroy(A_full);
-//    HYPRE_IJMatrixDestroy(B_full);
-//    delete[] glo_num_index;
-//    delete[] q_w;
-//    delete[] q_r;
-//    delete[] q_s;
-//    delete[] q_t;
-//    delete[] Bd_sum;
-//    free_double_pointer(elem_vert, n_dim + 1);
-//    free_double_pointer(A_loc, n_dim + 1);
-//    free_double_pointer(B_loc, n_dim + 1);
-//    free_double_pointer(J, n_dim);
-//    free_double_pointer(inv_J, n_dim);
-//    free_double_pointer(phi, n_quad);
-//    free_double_pointer(d_phi, n_dim + 1);
-//    free_double_pointer(d_phi_inv_J, n_dim + 1);
-//    free_double_pointer(w_phi, n_dim + 1);
+    int E_x = num_nodes - 1;
+    int E_y = num_nodes - 1;
+    int num_tri = 2;
+    int ***t_map = new int**[num_tri];
+
+    for (int t = 0; t < num_tri; t++)
+    {
+        t_map[t] = new int*[n_dim + 1];
+
+        for (int idx = 0; idx < n_dim + 1; idx++)
+        {
+            t_map[t][idx] = new int[n_dim];
+        }
+    }
+
+    t_map[0][0][0] = 0;
+    t_map[0][0][1] = 0;
+    t_map[0][1][0] = 1;
+    t_map[0][1][1] = 0;
+    t_map[0][2][0] = 1;
+    t_map[0][2][1] = 1;
+    t_map[1][0][0] = 0;
+    t_map[1][0][1] = 0;
+    t_map[1][1][0] = 1;
+    t_map[1][1][1] = 1;
+    t_map[1][2][0] = 0;
+    t_map[1][2][1] = 1;
+
+    for (int e_y = 0; e_y < E_y; e_y++)
+    {
+        for (int e_x = 0; e_x < E_x; e_x++)
+        {
+            for (int t = 0; t < num_tri; t++)
+            {
+                // Reset local stiffness and mass matrices
+                for (int i = 0; i < n_dim + 1; i++)
+                {
+                    for (int j = 0; j < n_dim + 1; j++)
+                    {
+                        A_loc[i][j] = 0.0;
+                        B_loc[i][j] = 0.0;
+                    }
+                }
+
+                // Get triangle
+                double x[n_dim + 1], y[n_dim + 1];
+                x[0] = gll_nodes[e_x + t_map[t][0][0]];
+                y[0] = gll_nodes[e_y + t_map[t][0][1]];
+                x[1] = gll_nodes[e_x + t_map[t][1][0]];
+                y[1] = gll_nodes[e_y + t_map[t][1][1]];
+                x[2] = gll_nodes[e_x + t_map[t][2][0]];
+                y[2] = gll_nodes[e_y + t_map[t][2][1]];
+
+                // Apply quadrature
+                for (int q = 0; q < n_quad; q++)
+                {
+                    // From r to p
+                    double q_p = p_map(q_r[q], q_s[q], x, y);
+                    double q_q = q_map(q_r[q], q_s[q], x, y);
+                    J_pr_map(J_pr, q_r[q], q_s[q], x, y);
+                    inverse(J_rp, J_pr, n_dim);
+
+                    // From p to x
+                    J_xp_map(J_xp, q_p, q_q);
+                    inverse(J_px, J_xp, n_dim);
+
+                    // From r to x
+                    for (int i = 0; i < n_dim; i++)
+                    {
+                        for (int j = 0; j < n_dim; j++)
+                        {
+                            J_xr[i][j] = 0.0;
+
+                            for (int k = 0; k < n_dim; k++)
+                            {
+                                J_xr[i][j] += J_xp[i][k] * J_pr[k][j];
+                            }
+                        }
+                    }
+
+                    double det_J_xr = determinant(J_xr, n_dim);
+
+                    // Integrand
+                    for (int i = 0; i < n_dim + 1; i++)
+                    {
+                        for (int j = 0; j < n_dim + 1; j++)
+                        {
+                            double func = 0.0;
+
+                            for (int alpha = 0; alpha < n_dim; alpha++)
+                            {
+                                double a = 0.0, b = 0.0;
+
+                                for (int beta = 0; beta < n_dim; beta++)
+                                {
+                                    double c = 0.0, d = 0.0;
+
+                                    for (int gamma = 0; gamma < n_dim; gamma++)
+                                    {
+                                        double dp[n_dim];
+
+                                        dphi[i](dp, q_r[q], q_s[q]);
+                                        c += dp[gamma] * J_rp[gamma][beta];
+
+                                        dphi[j](dp, q_r[q], q_s[q]);
+                                        d += dp[gamma] * J_rp[gamma][beta];
+                                    }
+
+                                    a += c * J_px[beta][alpha];
+                                    b += d * J_px[beta][alpha];
+                                }
+
+                                func += a * b;
+                            }
+
+                            A_loc[i][j] += func * det_J_xr * q_w[q];
+                            B_loc[i][j] += phi[i](q_r[q], q_s[q]) * phi[j](q_r[q], q_s[q]) * det_J_xr * q_w[q];
+                        }
+                    }
+                }
+
+                // Add to global matrix
+                int elem_id[n_dim + 1];
+                elem_id[0] = (e_x + t_map[t][0][0]) + (e_y + t_map[t][0][1]) * n_x;
+                elem_id[1] = (e_x + t_map[t][1][0]) + (e_y + t_map[t][1][1]) * n_x;
+                elem_id[2] = (e_x + t_map[t][2][0]) + (e_y + t_map[t][2][1]) * n_x;
+
+                for (int i = 0; i < n_dim + 1; i++)
+                {
+                    for (int j = 0; j < n_dim + 1; j++)
+                    {
+                        int row = glo_num[elem_id[i]];
+                        int col = glo_num[elem_id[j]];
+
+                        double A_val = A_loc[i][j];
+                        double B_val = B_loc[i][j];
+
+                        int ncols = 1;
+                        int insert_error;
+
+                        if (std::abs(A_val) > 1.0e-14)
+                        {
+                            insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
+                        }
+
+
+                        if (std::abs(B_val) > 1.0e-14)
+                        {
+                            insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
+                        }
+
+                        if (insert_error != 0)
+                        {
+                            printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Assemble full matrix
+    HYPRE_IJMatrixAssemble(A_full);
+    HYPRE_IJMatrixAssemble(B_full);
+
+    // Get index of glo_num
+    std::vector<std::pair<long int, long int>> glo_num_pair;
+
+    for (int i = 0; i < n_x * n_y * n_z * n_elem; i++)
+    {
+        glo_num_pair.push_back(std::pair<long int, long int>(glo_num[i], i));
+    }
+
+    std::sort(glo_num_pair.begin(), glo_num_pair.end());
+
+    int id = 1;
+    long int* glo_num_index = new long int[num_vertices]; // Vertex "i" is in position "glo_num_index[i]" in "glo_num"
+
+    glo_num_index[0] = glo_num_pair[0].second;
+
+    for (int i = 1; i < n_x * n_y * n_z * n_elem; i++)
+    {
+        if (glo_num_pair[i - 1].first != glo_num_pair[i].first)
+        {
+            glo_num_index[id] = glo_num_pair[i].second;
+
+            id++;
+        }
+    }
+
+    // Extract CRS arrays and apply Dirichlet boundary conditions
+    long int num_rows = max_rank;
+
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &A_bc);
+    HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(A_bc);
+
+    HYPRE_ParCSRMatrix A_full_csr;
+    HYPRE_IJMatrixGetObject(A_full, (void**) &A_full_csr);
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        int row = ranking[glo_num_index[i]];
+
+        if (row < num_rows)
+        {
+            int ncols;
+            int* cols;
+            double* values;
+
+            HYPRE_ParCSRMatrixGetRow(A_full_csr, i, &ncols, &cols, &values);
+
+            for (int j = 0; j < ncols; j++)
+            {
+                int col = ranking[glo_num_index[cols[j]]];
+
+                if (col < num_rows)
+                {
+                    int num_cols = 1;
+                    int insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &num_cols, &row, &col, values + j);
+
+                    if (insert_error != 0)
+                    {
+                        printf("There was an error with entry A_fem(%d, %d) = %f\n", row, col, values[j]);
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+
+            HYPRE_ParCSRMatrixRestoreRow(A_full_csr, i, &ncols, &cols, &values);
+        }
+    }
+
+    HYPRE_IJMatrixAssemble(A_bc);
+
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &B_bc);
+    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(B_bc);
+
+    HYPRE_ParCSRMatrix B_full_csr;
+    HYPRE_IJMatrixGetObject(B_full, (void**) &B_full_csr);
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        int row = ranking[glo_num_index[i]];
+
+        if (row < num_rows)
+        {
+            int ncols;
+            int* cols;
+            double* values;
+
+            HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
+
+            for (int j = 0; j < ncols; j++)
+            {
+                int col = ranking[glo_num_index[cols[j]]];
+
+                if (col < num_rows)
+                {
+                    int num_cols = 1;
+                    int insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &num_cols, &row, &col, values + j);
+
+                    if (insert_error != 0)
+                    {
+                        printf("There was an error with entry B_fem(%d, %d) = %f\n", row, col, values[j]);
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+
+            HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+        }
+    }
+
+    HYPRE_IJMatrixAssemble(B_bc);
+
+    // Build diagonal mass matrix with full mass matrix without boundary conditions
+    double* Bd_sum = new double[num_vertices];
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        int ncols;
+        int* cols;
+        double* values;
+
+        HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
+
+        Bd_sum[i] = 0.0;
+
+        for (int j = 0; j < ncols; j++)
+        {
+            Bd_sum[i] += values[j];
+        }
+
+        HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+    }
+
+    Bd_fem = new double[num_rows];
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        int row = ranking[glo_num_index[i]];
+
+        if (row < num_rows)
+        {
+            Bd_fem[row] = Bd_sum[i];
+        }
+    }
+
+    // Create ParCSR objects
+    HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
+    HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
+
+    // Free memory
+    HYPRE_IJMatrixDestroy(A_full);
+    HYPRE_IJMatrixDestroy(B_full);
+    delete[] glo_num_index;
+    delete[] q_w;
+    delete[] q_r;
+    delete[] q_s;
+    delete[] q_t;
+    delete[] Bd_sum;
+    free_double_pointer(A_loc, n_dim + 1);
+    free_double_pointer(B_loc, n_dim + 1);
+    free_double_pointer(J_rp, n_dim);
+    free_double_pointer(J_pr, n_dim);
+    free_double_pointer(J_xp, n_dim);
+    free_double_pointer(J_px, n_dim);
+    free_double_pointer(J_xr, n_dim);
 }
 
 // Geometric functions
-double x_map(double r, double s)
+double x_map(double p, double q)
 {
     switch (mapping)
     {
         case 1:
-            // Parabola
-            return ((1.0 - lambda) * pow(s, 2.0) + lambda) * r;
+            // Linear
+            return (lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - q)) * p;
 
         case 2:
+            // Parabola
+            return ((1.0 - lambda) * pow(q, 2.0) + lambda) * p;
+
+        case 3:
             // Cosine
-            return ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s))) * r;
+            return ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * q))) * p;
 
         default:
             // None
-            return r;
+            return p;
     }
 }
 
-double y_map(double r, double s)
+double y_map(double p, double q)
 {
     switch (mapping)
     {
         case 1:
-            // Parabola
-            return s;
+            // Linear
+            return q;
 
         case 2:
+            // Parabola
+            return q;
+
+        case 3:
             // Cosine
-            return s;
+            return q;
 
         default:
             // None
-            return s;
+            return q;
     }
 }
 
-double det_J_map(double r, double s)
+void J_xp_map(double **J_xp, double p, double q)
 {
+    double dx_dp, dx_dq, dy_dp, dy_dq;
+
     switch (mapping)
     {
         case 1:
-            // Parabola
-            return (1.0 - lambda) * pow(s, 2.0) + lambda;
+            // Linear
+            dx_dp = lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - q);
+            dx_dq = (1.0 / 2.0) * (lambda - 1.0) * p;
+            dy_dp = 0.0;
+            dy_dq = 1.0;
+
+            break;
 
         case 2:
+            // Parabola
+            dx_dp = (1.0 - lambda) * pow(q, 2.0) + lambda;
+            dx_dq = 2.0 * p * q * (1.0 - lambda);
+            dy_dp = 0.0;
+            dy_dq = 1.0;
+
+            break;
+
+        case 3:
             // Cosine
-            return (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s));
+            dx_dp = (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * q));
+            dx_dq = - (M_PI / 2.0) * p * (lambda - 1.0) * sin(M_PI * q);
+            dy_dp = 0.0;
+            dy_dq = 1.0;
+
+            break;
 
         default:
             // None
-            return 1.0;
+            dx_dp = 1.0;
+            dx_dq = 0.0;
+            dy_dp = 0.0;
+            dy_dq = 1.0;
+
+            break;
     }
+
+    J_xp[0][0] = dx_dp;
+    J_xp[0][1] = dx_dq;
+    J_xp[1][0] = dy_dp;
+    J_xp[1][1] = dy_dq;
+}
+
+double p_map(double r, double s, double x[], double y[])
+{
+    double p = 0.0;
+
+    for (int i = 0; i < n_dim + 1; i++)
+    {
+        p += x[i] * phi[i](r, s);
+    }
+
+    return p;
+}
+
+double q_map(double r, double s, double x[], double y[])
+{
+    double q = 0.0;
+
+    for (int i = 0; i < n_dim + 1; i++)
+    {
+        q += y[i] * phi[i](r, s);
+    }
+
+    return q;
+}
+
+void J_pr_map(double **J_pr, double r, double s, double x[], double y[])
+{
+    double dp_dr = 0.0, dp_ds = 0.0, dq_dr = 0.0, dq_ds = 0.0;
+    double deriv[n_dim];
+
+    for (int i = 0; i < n_dim + 1; i++)
+    {
+        dphi[i](deriv, r, s);
+
+        dp_dr += x[i] * deriv[0];
+        dp_ds += x[i] * deriv[1];
+        dq_dr += y[i] * deriv[0];
+        dq_ds += y[i] * deriv[1];
+    }
+
+    J_pr[0][0] = dp_dr;
+    J_pr[0][1] = dp_ds;
+    J_pr[1][0] = dq_dr;
+    J_pr[1][1] = dq_ds;
 }
 
 // Math Functions
@@ -946,7 +1009,7 @@ double determinant(double** A, int n)
     }
 }
 
-void inverse(double**& inv_A, double** A, int n, double det_A = 0.0)
+void inverse(double**& inv_A, double** A, int n, double det_A)
 {
     /*
      * Computes the inverse of a matrix
