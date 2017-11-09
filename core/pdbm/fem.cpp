@@ -217,8 +217,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
      * Computes the triangular elements from a rectangular mesh
      */
     // Allocate element array
-    //const int tri_per_elem = 2;
-    const int tri_per_elem = 4;
+    const int tri_per_elem = 2;
+    //const int tri_per_elem = 4;
 
     num_fem_elem = tri_per_elem * num_sub_elem;
 
@@ -230,8 +230,8 @@ void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** 
     }
 
     // Generate triangles
-    //int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
-    int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
+    int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
+    //int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
 
     for (int e = 0; e < num_sub_elem; e++)
     {
@@ -476,9 +476,10 @@ void fem_matrices(double** V, long int** E, int num_elements)
     HYPRE_IJMatrixAssemble(A_full);
     HYPRE_IJMatrixAssemble(B_full);
 
-    //HYPRE_IJMatrixPrint(A_full, "A");
-
-    //exit(EXIT_SUCCESS);
+//    HYPRE_IJMatrixPrint(A_full, "A_t");
+//    HYPRE_IJMatrixPrint(B_full, "B_t");
+//
+//    exit(EXIT_SUCCESS);
 
     // Get index of glo_num
     std::vector<std::pair<long int, long int>> glo_num_pair;
