@@ -32,8 +32,8 @@ double *Binv_sem;
 double *Bd_fem;
 int num_nodes;
 double *gll_nodes;
-std::vector<std::function<double (double, double)>> phi;
-std::vector<std::function<void (double *, double,  double)>> dphi;
+std::vector<std::function<double (double *)>> phi;
+std::vector<std::function<void (double *, double *)>> dphi;
 
 // Functions definition
 void assemble_fem_matrices_()
@@ -346,13 +346,28 @@ void generate_basis()
     free_double_pointer(P, num_nodes);
 
     // Functions
-    phi.push_back([] (double r, double s) { return r; });
-    phi.push_back([] (double r, double s) { return s; });
-    phi.push_back([] (double r, double s) { return 1.0 - r - s; });
+    if (n_dim == 2)
+    {
+        phi.push_back([] (double *r) { return r[0]; });
+        phi.push_back([] (double *r) { return r[1]; });
+        phi.push_back([] (double *r) { return 1.0 - r[0] - r[1]; });
 
-    dphi.push_back([] (double *dp, double r, double s) { dp[0] = 1.0; dp[1] = 0.0; });
-    dphi.push_back([] (double *dp, double r, double s) { dp[0] = 0.0; dp[1] = 1.0; });
-    dphi.push_back([] (double *dp, double r, double s) { dp[0] = -1.0; dp[1] = -1.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 1.0; dp[1] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 1.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = -1.0; dp[1] = -1.0; });
+    }
+    else
+    {
+        phi.push_back([] (double *r) { return r[0]; });
+        phi.push_back([] (double *r) { return r[1]; });
+        phi.push_back([] (double *r) { return r[2]; });
+        phi.push_back([] (double *r) { return 1.0 - r[0] - r[1] - r[2]; });
+
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 1.0; dp[1] = 0.0; dp[2] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 1.0; dp[2] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 0.0; dp[2] = 1.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = -1.0; dp[1] = -1.0; dp[2] = -1.0; });
+    }
 }
 
 void fem_matrices(double **V, long int **E, int num_elements)
@@ -378,41 +393,28 @@ void fem_matrices(double **V, long int **E, int num_elements)
     // FEM Variables
     double **A_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
     double **B_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double **J_pr = allocate_double_pointer<double>(n_dim, n_dim);
-    double **J_rp = allocate_double_pointer<double>(n_dim, n_dim);
-    double **J_xp = allocate_double_pointer<double>(n_dim, n_dim);
-    double **J_px = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_ur = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_ru = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_xu = allocate_double_pointer<double>(n_dim, n_dim);
+    double **J_ux = allocate_double_pointer<double>(n_dim, n_dim);
     double **J_xr = allocate_double_pointer<double>(n_dim, n_dim);
 
     // Quadrature rule
     int n_quad;
-    double* q_r;
-    double* q_s;
-    double* q_t;
+    double** q_r;
     double* q_w;
 
     if (n_dim == 2)
     {
         n_quad = 3;
-
-        q_r = new double[n_quad];
-        q_s = new double[n_quad];
-        q_t = new double[n_quad];
-        q_w = new double[n_quad];
+        q_r = allocate_double_pointer<double>(n_quad, n_dim);
+        q_w = allocate_single_pointer<double>(n_quad);
 
         if (n_quad == 3)
         {
-            q_r[0] = 1.0 / 6.0;
-            q_r[1] = 2.0 / 3.0;
-            q_r[2] = 1.0 / 6.0;
-
-            q_s[0] = 1.0 / 6.0;
-            q_s[1] = 1.0 / 6.0;
-            q_s[2] = 2.0 / 3.0;
-
-            q_t[0] = 0.0;
-            q_t[1] = 0.0;
-            q_t[2] = 0.0;
+            q_r[0][0] = 1.0 / 6.0; q_r[0][1] = 1.0 / 6.0;
+            q_r[1][0] = 2.0 / 3.0; q_r[1][1] = 1.0 / 6.0;
+            q_r[2][0] = 1.0 / 6.0; q_r[2][1] = 2.0 / 3.0;
 
             q_w[0] = 1.0 / 6.0;
             q_w[1] = 1.0 / 6.0;
@@ -420,20 +422,10 @@ void fem_matrices(double **V, long int **E, int num_elements)
         }
         else
         {
-            q_r[0] = 1.0 / 3.0;
-            q_r[1] = 1.0 / 5.0;
-            q_r[2] = 1.0 / 5.0;
-            q_r[3] = 3.0 / 5.0;
-
-            q_s[0] = 1.0 / 3.0;
-            q_s[1] = 3.0 / 5.0;
-            q_s[2] = 1.0 / 5.0;
-            q_s[3] = 1.0 / 5.0;
-
-            q_t[0] = 0.0;
-            q_t[1] = 0.0;
-            q_t[2] = 0.0;
-            q_t[3] = 0.0;
+            q_r[0][0] = 1.0 / 3.0; q_r[0][1] = 1.0 / 3.0;
+            q_r[1][0] = 1.0 / 5.0; q_r[1][1] = 3.0 / 5.0;
+            q_r[2][0] = 1.0 / 5.0; q_r[2][1] = 1.0 / 5.0;
+            q_r[3][0] = 3.0 / 5.0; q_r[3][1] = 1.0 / 5.0;
 
             q_w[0] = - 27.0 / 96.0;
             q_w[1] = 25.0 / 96.0;
@@ -444,229 +436,264 @@ void fem_matrices(double **V, long int **E, int num_elements)
     else
     {
         n_quad = 4;
-        q_r = new double[n_quad];
-        q_s = new double[n_quad];
-        q_t = new double[n_quad];;
-        q_w = new double[n_quad];
+        q_r = allocate_double_pointer<double>(n_quad, n_dim);
+        q_w = allocate_single_pointer<double>(n_quad);
 
-        double a = (5.0 + 3.0 * sqrt(5.0)) / 20.0;
-        double b = (5.0 - sqrt(5.0)) / 20.0;
+        if (n_quad == 4)
+        {
+            double a = (5.0 + 3.0 * sqrt(5.0)) / 20.0;
+            double b = (5.0 - sqrt(5.0)) / 20.0;
 
-        q_r[0] = a;
-        q_r[1] = b;
-        q_r[2] = b;
-        q_r[3] = b;
+            q_r[0][0] = a; q_r[0][1] = b; q_r[0][2] = b;
+            q_r[1][0] = b; q_r[1][1] = a; q_r[1][2] = b;
+            q_r[2][0] = b; q_r[2][1] = b; q_r[2][2] = a;
+            q_r[3][0] = b; q_r[3][1] = b; q_r[3][2] = b;
 
-        q_s[0] = b;
-        q_s[1] = a;
-        q_s[2] = b;
-        q_s[3] = b;
+            q_w[0] = 1.0 / 24.0;
+            q_w[1] = 1.0 / 24.0;
+            q_w[2] = 1.0 / 24.0;
+            q_w[3] = 1.0 / 24.0;
+        }
+        else
+        {
+            q_r[0][0] = 1.0 / 2.0; q_r[0][1] = 1.0 / 6.0; q_r[0][2] = 1.0 / 6.0;
+            q_r[1][0] = 1.0 / 6.0; q_r[1][1] = 1.0 / 2.0; q_r[1][2] = 1.0 / 6.0;
+            q_r[2][0] = 1.0 / 6.0; q_r[2][1] = 1.0 / 6.0; q_r[2][2] = 1.0 / 2.0;
+            q_r[3][0] = 1.0 / 6.0; q_r[3][1] = 1.0 / 6.0; q_r[3][2] = 1.0 / 6.0;
+            q_r[4][0] = 1.0 / 4.0; q_r[4][1] = 1.0 / 4.0; q_r[4][2] = 1.0 / 4.0;
 
-        q_t[0] = b;
-        q_t[1] = b;
-        q_t[2] = a;
-        q_t[3] = b;
-
-        q_w[0] = 1.0 / 24.0;
-        q_w[1] = 1.0 / 24.0;
-        q_w[2] = 1.0 / 24.0;
-        q_w[3] = 1.0 / 24.0;
+            q_w[0] = 9.0 / 20.0;
+            q_w[1] = 9.0 / 20.0;
+            q_w[2] = 9.0 / 20.0;
+            q_w[3] = 9.0 / 20.0;
+            q_w[4] = - 4.0 / 5.0;
+        }
     }
 
     // FEM Assembly process
     int E_x = num_nodes - 1;
     int E_y = num_nodes - 1;
-    int num_tri = 4;
-    int ***t_map = new int**[num_tri];
+    int E_z = (n_dim == 2) ? 1 : num_nodes - 1;
+    int **v_coord = allocate_double_pointer<int>(pow(n_dim, 2), n_dim);
+    int num_tess = 6;
+    int **t_map = allocate_double_pointer<int>(num_tess, n_dim + 1);
 
-    for (int t = 0; t < num_tri; t++)
+    if (n_dim == 2)
     {
-        t_map[t] = new int*[n_dim + 1];
+        v_coord[0][0] = 0; v_coord[0][1] = 0;
+        v_coord[1][0] = 1; v_coord[1][1] = 0;
+        v_coord[2][0] = 0; v_coord[2][1] = 1;
+        v_coord[3][0] = 1; v_coord[3][1] = 1;
 
-        for (int idx = 0; idx < n_dim + 1; idx++)
+        if (num_tess == 2)
         {
-            t_map[t][idx] = new int[n_dim];
+            t_map[0][0] = 0; t_map[0][1] = 1; t_map[0][2] = 3;
+            t_map[1][0] = 0; t_map[1][1] = 3; t_map[1][2] = 2;
         }
-    }
-
-    if (num_tri == 2)
-    {
-        t_map[0][0][0] = 0;
-        t_map[0][0][1] = 0;
-        t_map[0][1][0] = 1;
-        t_map[0][1][1] = 0;
-        t_map[0][2][0] = 1;
-        t_map[0][2][1] = 1;
-        t_map[1][0][0] = 0;
-        t_map[1][0][1] = 0;
-        t_map[1][1][0] = 1;
-        t_map[1][1][1] = 1;
-        t_map[1][2][0] = 0;
-        t_map[1][2][1] = 1;
-    }
-    else if (num_tri == 4)
-    {
-        t_map[0][0][0] = 1;
-        t_map[0][0][1] = 0;
-        t_map[0][1][0] = 0;
-        t_map[0][1][1] = 1;
-        t_map[0][2][0] = 0;
-        t_map[0][2][1] = 0;
-
-        t_map[1][0][0] = 1;
-        t_map[1][0][1] = 1;
-        t_map[1][1][0] = 0;
-        t_map[1][1][1] = 0;
-        t_map[1][2][0] = 1;
-        t_map[1][2][1] = 0;
-
-        t_map[2][0][0] = 0;
-        t_map[2][0][1] = 1;
-        t_map[2][1][0] = 1;
-        t_map[2][1][1] = 0;
-        t_map[2][2][0] = 1;
-        t_map[2][2][1] = 1;
-
-        t_map[3][0][0] = 0;
-        t_map[3][0][1] = 0;
-        t_map[3][1][0] = 1;
-        t_map[3][1][1] = 1;
-        t_map[3][2][0] = 0;
-        t_map[3][2][1] = 1;
+        else if (num_tess == 4)
+        {
+            t_map[0][0] = 1; t_map[0][1] = 2; t_map[0][2] = 0;
+            t_map[1][0] = 3; t_map[1][1] = 0; t_map[1][2] = 1;
+            t_map[3][0] = 0; t_map[2][1] = 3; t_map[2][2] = 2;
+            t_map[2][0] = 2; t_map[2][1] = 1; t_map[2][2] = 3;
+        }
+        else
+        {
+            printf("Wrong number of triangles\n");
+            exit(EXIT_FAILURE);
+        }
     }
     else
     {
-        printf("Wrong number of triangles\n");
-        exit(EXIT_FAILURE);
+        v_coord[0][0] = 0; v_coord[0][1] = 0; v_coord[0][2] = 0;
+        v_coord[1][0] = 1; v_coord[1][1] = 0; v_coord[1][2] = 0;
+        v_coord[2][0] = 0; v_coord[2][1] = 1; v_coord[2][2] = 0;
+        v_coord[3][0] = 1; v_coord[3][1] = 1; v_coord[3][2] = 0;
+        v_coord[4][0] = 0; v_coord[4][1] = 0; v_coord[4][2] = 1;
+        v_coord[5][0] = 1; v_coord[5][1] = 0; v_coord[5][2] = 1;
+        v_coord[6][0] = 0; v_coord[6][1] = 1; v_coord[6][2] = 1;
+        v_coord[7][0] = 1; v_coord[7][1] = 1; v_coord[7][2] = 1;
+
+        if (num_tess == 6)
+        {
+            t_map[0][0] = 0; t_map[0][1] = 2; t_map[0][2] = 1; t_map[0][3] = 5;
+            t_map[1][0] = 1; t_map[1][1] = 2; t_map[1][2] = 3; t_map[1][3] = 5;
+            t_map[2][0] = 0; t_map[2][1] = 4; t_map[2][2] = 2; t_map[2][3] = 5;
+            t_map[3][0] = 5; t_map[3][1] = 3; t_map[3][2] = 7; t_map[3][3] = 2;
+            t_map[4][0] = 4; t_map[4][1] = 5; t_map[4][2] = 6; t_map[4][3] = 2;
+            t_map[5][0] = 5; t_map[5][1] = 7; t_map[5][2] = 6; t_map[5][3] = 2;
+        }
+        else if (num_tess == 8)
+        {
+            t_map[0][0] = 0; t_map[0][1] = 2; t_map[0][2] = 1; t_map[0][3] = 4;
+            t_map[1][0] = 1; t_map[1][1] = 0; t_map[1][2] = 3; t_map[1][3] = 5;
+            t_map[2][0] = 2; t_map[2][1] = 6; t_map[2][2] = 3; t_map[2][3] = 0;
+            t_map[3][0] = 3; t_map[3][1] = 2; t_map[3][2] = 7; t_map[3][3] = 1;
+            t_map[4][0] = 4; t_map[4][1] = 5; t_map[4][2] = 6; t_map[4][3] = 0;
+            t_map[5][0] = 5; t_map[5][1] = 7; t_map[5][2] = 4; t_map[5][3] = 1;
+            t_map[6][0] = 6; t_map[6][1] = 7; t_map[6][2] = 2; t_map[6][3] = 4;
+            t_map[7][0] = 7; t_map[7][1] = 3; t_map[7][2] = 6; t_map[7][3] = 5;
+        }
+        else
+        {
+            printf("Wrong number of tetrahedrals\n");
+            exit(EXIT_SUCCESS);
+        }
     }
 
-    for (int e_y = 0; e_y < E_y; e_y++)
+    double **x = allocate_double_pointer<double>(n_dim, n_dim + 1);
+    double *q_u = allocate_single_pointer<double>(n_dim);
+
+    for (int e_z = 0; e_z < E_z; e_z++)
     {
-        for (int e_x = 0; e_x < E_x; e_x++)
+        for (int e_y = 0; e_y < E_y; e_y++)
         {
-            for (int t = 0; t < num_tri; t++)
+            for (int e_x = 0; e_x < E_x; e_x++)
             {
-                // Reset local stiffness and mass matrices
-                for (int i = 0; i < n_dim + 1; i++)
+                for (int t = 0; t < num_tess; t++)
                 {
-                    for (int j = 0; j < n_dim + 1; j++)
-                    {
-                        A_loc[i][j] = 0.0;
-                        B_loc[i][j] = 0.0;
-                    }
-                }
-
-                // Get triangle
-                double x[n_dim + 1], y[n_dim + 1];
-                x[0] = gll_nodes[e_x + t_map[t][0][0]];
-                y[0] = gll_nodes[e_y + t_map[t][0][1]];
-                x[1] = gll_nodes[e_x + t_map[t][1][0]];
-                y[1] = gll_nodes[e_y + t_map[t][1][1]];
-                x[2] = gll_nodes[e_x + t_map[t][2][0]];
-                y[2] = gll_nodes[e_y + t_map[t][2][1]];
-
-                // Apply quadrature
-                for (int q = 0; q < n_quad; q++)
-                {
-                    // From r to p
-                    double q_p = p_map(q_r[q], q_s[q], x, y);
-                    double q_q = q_map(q_r[q], q_s[q], x, y);
-                    J_pr_map(J_pr, q_r[q], q_s[q], x, y);
-                    inverse(J_rp, J_pr, n_dim);
-
-                    // From p to x
-                    J_xp_map(J_xp, q_p, q_q);
-                    inverse(J_px, J_xp, n_dim);
-
-                    // From r to x
-                    for (int i = 0; i < n_dim; i++)
-                    {
-                        for (int j = 0; j < n_dim; j++)
-                        {
-                            J_xr[i][j] = 0.0;
-
-                            for (int k = 0; k < n_dim; k++)
-                            {
-                                J_xr[i][j] += J_xp[i][k] * J_pr[k][j];
-                            }
-                        }
-                    }
-
-                    double det_J_xr = determinant(J_xr, n_dim);
-
-                    // Integrand
+                    // Reset local stiffness and mass matrices
                     for (int i = 0; i < n_dim + 1; i++)
                     {
                         for (int j = 0; j < n_dim + 1; j++)
                         {
-                            double func = 0.0;
-
-                            for (int alpha = 0; alpha < n_dim; alpha++)
-                            {
-                                double a = 0.0, b = 0.0;
-
-                                for (int beta = 0; beta < n_dim; beta++)
-                                {
-                                    double c = 0.0, d = 0.0;
-
-                                    for (int gamma = 0; gamma < n_dim; gamma++)
-                                    {
-                                        double dp[n_dim];
-
-                                        dphi[i](dp, q_r[q], q_s[q]);
-                                        c += dp[gamma] * J_rp[gamma][beta];
-
-                                        dphi[j](dp, q_r[q], q_s[q]);
-                                        d += dp[gamma] * J_rp[gamma][beta];
-                                    }
-
-                                    a += c * J_px[beta][alpha];
-                                    b += d * J_px[beta][alpha];
-                                }
-
-                                func += a * b;
-                            }
-
-                            A_loc[i][j] += func * det_J_xr * q_w[q];
-                            B_loc[i][j] += phi[i](q_r[q], q_s[q]) * phi[j](q_r[q], q_s[q]) * det_J_xr * q_w[q];
+                            A_loc[i][j] = 0.0;
+                            B_loc[i][j] = 0.0;
                         }
                     }
-                }
 
-                // Add to global matrix
-                int elem_id[n_dim + 1];
-                elem_id[0] = (e_x + t_map[t][0][0]) + (e_y + t_map[t][0][1]) * n_x;
-                elem_id[1] = (e_x + t_map[t][1][0]) + (e_y + t_map[t][1][1]) * n_x;
-                elem_id[2] = (e_x + t_map[t][2][0]) + (e_y + t_map[t][2][1]) * n_x;
+                    // Get triangle
+                    int e[n_dim];
 
-                for (int i = 0; i < n_dim + 1; i++)
-                {
-                    for (int j = 0; j < n_dim + 1; j++)
+                    if (n_dim == 2)
                     {
-                        int row = glo_num[elem_id[i]];
-                        int col = glo_num[elem_id[j]];
+                        e[0] = e_x;
+                        e[1] = e_y;
+                    }
+                    else
+                    {
+                        e[0] = e_x;
+                        e[1] = e_y;
+                        e[2] = e_z;
+                    }
 
-                        double A_val = A_loc[i][j];
-                        double B_val = B_loc[i][j];
-
-                        int ncols = 1;
-                        int insert_error;
-
-                        if (std::abs(A_val) > 1.0e-14)
+                    for (int d = 0; d < n_dim; d++)
+                    {
+                        for (int i = 0; i < n_dim + 1; i++)
                         {
-                            insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
+                            x[d][i] = gll_nodes[e[d] + v_coord[t_map[t][i]][d]];
+                        }
+                    }
+
+                    // Apply quadrature
+                    for (int q = 0; q < n_quad; q++)
+                    {
+                        // From r to u
+                        u_map(q_u, q_r[q], x);
+                        J_ur_map(J_ur, q_r[q], x);
+                        inverse(J_ru, J_ur, n_dim);
+
+                        // From u to x
+                        J_xu_map(J_xu, q_u);
+                        inverse(J_ux, J_xu, n_dim);
+
+                        // From r to x
+                        for (int i = 0; i < n_dim; i++)
+                        {
+                            for (int j = 0; j < n_dim; j++)
+                            {
+                                J_xr[i][j] = 0.0;
+
+                                for (int k = 0; k < n_dim; k++)
+                                {
+                                    J_xr[i][j] += J_xu[i][k] * J_ur[k][j];
+                                }
+                            }
                         }
 
+                        double det_J_xr = determinant(J_xr, n_dim);
 
-                        if (std::abs(B_val) > 1.0e-14)
+                        // Integrand
+                        for (int i = 0; i < n_dim + 1; i++)
                         {
-                            insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
+                            for (int j = 0; j < n_dim + 1; j++)
+                            {
+                                double func = 0.0;
+
+                                for (int alpha = 0; alpha < n_dim; alpha++)
+                                {
+                                    double a = 0.0, b = 0.0;
+
+                                    for (int beta = 0; beta < n_dim; beta++)
+                                    {
+                                        double c = 0.0, d = 0.0;
+
+                                        for (int gamma = 0; gamma < n_dim; gamma++)
+                                        {
+                                            double dp[n_dim];
+
+                                            dphi[i](dp, q_r[q]);
+                                            c += dp[gamma] * J_ru[gamma][beta];
+
+                                            dphi[j](dp, q_r[q]);
+                                            d += dp[gamma] * J_ru[gamma][beta];
+                                        }
+
+                                        a += c * J_ux[beta][alpha];
+                                        b += d * J_ux[beta][alpha];
+                                    }
+
+                                    func += a * b;
+                                }
+
+                                A_loc[i][j] += func * det_J_xr * q_w[q];
+                                B_loc[i][j] += phi[i](q_r[q]) * phi[j](q_r[q]) * det_J_xr * q_w[q];
+                            }
                         }
+                    }
 
-                        if (insert_error != 0)
+                    // Add to global matrix
+                    int elem_id[n_dim + 1];
+
+                    for (int i = 0; i < n_dim + 1; i++)
+                    {
+                        elem_id[i] = 0;
+
+                        for (int d = 0; d < n_dim; d++)
                         {
-                            printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
-                            exit(EXIT_FAILURE);
+                            elem_id[i] += (e[d] + v_coord[t_map[t][i]][d]) * pow(n_x, d);
+                        }
+                    }
+
+                    for (int i = 0; i < n_dim + 1; i++)
+                    {
+                        for (int j = 0; j < n_dim + 1; j++)
+                        {
+                            int row = glo_num[elem_id[i]];
+                            int col = glo_num[elem_id[j]];
+
+                            double A_val = A_loc[i][j];
+                            double B_val = B_loc[i][j];
+
+                            int ncols = 1;
+                            int insert_error;
+
+                            if (std::abs(A_val) > 1.0e-14)
+                            {
+                                insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
+                            }
+
+
+                            if (std::abs(B_val) > 1.0e-14)
+                            {
+                                insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
+                            }
+
+                            if (insert_error != 0)
+                            {
+                                printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
+                                exit(EXIT_FAILURE);
+                            }
                         }
                     }
                 }
@@ -831,157 +858,271 @@ void fem_matrices(double **V, long int **E, int num_elements)
     HYPRE_IJMatrixDestroy(A_full);
     HYPRE_IJMatrixDestroy(B_full);
     delete[] glo_num_index;
-    delete[] q_w;
-    delete[] q_r;
-    delete[] q_s;
-    delete[] q_t;
     delete[] Bd_sum;
+    free_single_pointer(q_u);
+    free_single_pointer(q_w);
+    free_double_pointer(x, n_dim);
+    free_double_pointer(q_r, n_quad);
     free_double_pointer(A_loc, n_dim + 1);
     free_double_pointer(B_loc, n_dim + 1);
-    free_double_pointer(J_rp, n_dim);
-    free_double_pointer(J_pr, n_dim);
-    free_double_pointer(J_xp, n_dim);
-    free_double_pointer(J_px, n_dim);
+    free_double_pointer(J_ru, n_dim);
+    free_double_pointer(J_ur, n_dim);
+    free_double_pointer(J_xu, n_dim);
+    free_double_pointer(J_ux, n_dim);
     free_double_pointer(J_xr, n_dim);
 }
 
 // Geometric functions
-double x_map(double p, double q)
+void x_map(double *x, double *u)
 {
+    // u -> x
     switch (mapping)
     {
         case 1:
             // Linear
-            return (lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - q)) * p;
-
-        case 2:
-            // Parabola
-            return ((1.0 - lambda) * pow(q, 2.0) + lambda) * p;
-
-        case 3:
-            // Cosine
-            return ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * q))) * p;
-
-        default:
-            // None
-            return p;
-    }
-}
-
-double y_map(double p, double q)
-{
-    switch (mapping)
-    {
-        case 1:
-            // Linear
-            return q;
-
-        case 2:
-            // Parabola
-            return q;
-
-        case 3:
-            // Cosine
-            return q;
-
-        default:
-            // None
-            return q;
-    }
-}
-
-void J_xp_map(double **J_xp, double p, double q)
-{
-    double dx_dp, dx_dq, dy_dp, dy_dq;
-
-    switch (mapping)
-    {
-        case 1:
-            // Linear
-            dx_dp = lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - q);
-            dx_dq = (1.0 / 2.0) * (lambda - 1.0) * p;
-            dy_dp = 0.0;
-            dy_dq = 1.0;
+            x[0] = (lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - u[1])) * u[0];
 
             break;
 
         case 2:
             // Parabola
-            dx_dp = (1.0 - lambda) * pow(q, 2.0) + lambda;
-            dx_dq = 2.0 * p * q * (1.0 - lambda);
-            dy_dp = 0.0;
-            dy_dq = 1.0;
+            x[0] = ((1.0 - lambda) * pow(u[1], 2.0) + lambda) * u[0];
 
             break;
 
         case 3:
             // Cosine
-            dx_dp = (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * q));
-            dx_dq = - (M_PI / 2.0) * p * (lambda - 1.0) * sin(M_PI * q);
-            dy_dp = 0.0;
-            dy_dq = 1.0;
+            x[0] = ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * u[1]))) * u[0];
 
             break;
 
         default:
             // None
-            dx_dp = 1.0;
-            dx_dq = 0.0;
-            dy_dp = 0.0;
-            dy_dq = 1.0;
+            x[0] = u[0];
 
             break;
     }
 
-    J_xp[0][0] = dx_dp;
-    J_xp[0][1] = dx_dq;
-    J_xp[1][0] = dy_dp;
-    J_xp[1][1] = dy_dq;
-}
-
-double p_map(double r, double s, double x[], double y[])
-{
-    double p = 0.0;
-
-    for (int i = 0; i < n_dim + 1; i++)
+    // v -> y
+    switch (mapping)
     {
-        p += x[i] * phi[i](r, s);
+        case 1:
+            // Linear
+            if (n_dim == 2)
+            {
+                x[1] = u[1];
+            }
+            else
+            {
+                x[1] = (lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - u[0])) * u[1];
+            }
+
+            break;
+
+        case 2:
+            // Parabola
+            if (n_dim == 2)
+            {
+                x[1] = u[1];
+            }
+            else
+            {
+                x[1] = ((1.0 - lambda) * pow(u[0], 2.0) + lambda) * u[1];
+            }
+
+            break;
+
+        case 3:
+            // Cosine
+            if (n_dim == 2)
+            {
+                x[1] = u[1];
+            }
+            else
+            {
+                x[1] = ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * u[0]))) * u[1];
+            }
+
+            break;
+
+        default:
+            // None
+            x[1] = u[1];
     }
 
-    return p;
-}
-
-double q_map(double r, double s, double x[], double y[])
-{
-    double q = 0.0;
-
-    for (int i = 0; i < n_dim + 1; i++)
+    // w -> z
+    switch (mapping)
     {
-        q += y[i] * phi[i](r, s);
-    }
+        case 1:
+            if (n_dim == 3)
+            {
+                x[2] = u[2];
+            }
 
-    return q;
+            break;
+
+        case 2:
+            // Parabola
+            if (n_dim == 3)
+            {
+                x[2] = u[2];
+            }
+
+            break;
+
+        case 3:
+            // Cosine
+            if (n_dim == 3)
+            {
+                x[2] = u[2];
+            }
+
+            break;
+
+        default:
+            // None
+            if (n_dim == 3)
+            {
+                x[2] = u[2];
+            }
+
+            break;
+    }
 }
 
-void J_pr_map(double **J_pr, double r, double s, double x[], double y[])
+void J_xu_map(double **J_xu, double *u)
 {
-    double dp_dr = 0.0, dp_ds = 0.0, dq_dr = 0.0, dq_ds = 0.0;
+    switch (mapping)
+    {
+        case 1:
+            // Linear
+            if (n_dim == 2)
+            {
+                J_xu[0][0] = lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - u[1]);
+                J_xu[0][1] = (1.0 / 2.0) * (lambda - 1.0) * u[0];
+                J_xu[1][0] = 0.0;
+                J_xu[1][1] = 1.0;
+            }
+            else
+            {
+                J_xu[0][0] = lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - u[1]);
+                J_xu[0][1] = (1.0 / 2.0) * (lambda - 1.0) * u[0];
+                J_xu[0][2] = 0.0;
+                J_xu[1][0] = (1.0 / 2.0) * (lambda - 1.0) * u[1];
+                J_xu[1][1] = lambda + (1.0 / 2.0) * (1.0 - lambda) * (1.0 - u[0]);
+                J_xu[1][2] = 0.0;
+                J_xu[2][0] = 0.0;
+                J_xu[2][1] = 0.0;
+                J_xu[2][2] = 1.0;
+            }
+
+            break;
+
+        case 2:
+            // Parabola
+            if (n_dim == 2)
+            {
+                J_xu[0][0] = (1.0 - lambda) * pow(u[1], 2.0) + lambda;
+                J_xu[0][1] = 2.0 * (1.0 - lambda) * u[0] * u[1];
+                J_xu[1][0] = 0.0;
+                J_xu[1][1] = 1.0;
+            }
+            else
+            {
+                J_xu[0][0] = (1.0 - lambda) * pow(u[1], 2.0) + lambda;
+                J_xu[0][1] = 2.0 * (1.0 - lambda) * u[0] * u[1];
+                J_xu[0][2] = 0.0;
+                J_xu[1][0] = 2.0 * (1.0 - lambda) * u[0] * u[1];
+                J_xu[1][1] = (1.0 - lambda) * pow(u[0], 2.0) + lambda;
+                J_xu[1][2] = 0.0;
+                J_xu[2][0] = 0.0;
+                J_xu[2][1] = 0.0;
+                J_xu[2][2] = 1.0;
+            }
+
+            break;
+
+        case 3:
+            // Cosine
+            if (n_dim == 2)
+            {
+                J_xu[0][0] = (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * u[1]));
+                J_xu[0][1] = (M_PI / 2.0) * (1.0 - lambda) * u[0] * sin(M_PI * u[1]);
+                J_xu[1][0] = 0.0;
+                J_xu[1][1] = 1.0;
+            }
+            else
+            {
+                J_xu[0][0] = (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * u[1]));
+                J_xu[0][1] = (M_PI / 2.0) * (1.0 - lambda) * u[0] * sin(M_PI * u[1]);
+                J_xu[0][2] = 0.0;
+                J_xu[1][0] = (M_PI / 2.0) * (1.0 - lambda) * u[1] * sin(M_PI * u[0]);
+                J_xu[1][1] = (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * u[0]));
+                J_xu[1][2] = 0.0;
+                J_xu[2][0] = 0.0;
+                J_xu[2][1] = 0.0;
+                J_xu[2][2] = 1.0;
+            }
+
+            break;
+
+        default:
+            // None
+            if (n_dim == 2)
+            {
+                J_xu[0][0] = 1.0;
+                J_xu[0][1] = 0.0;
+                J_xu[1][0] = 0.0;
+                J_xu[1][1] = 1.0;
+            }
+            else
+            {
+                J_xu[0][0] = 1.0;
+                J_xu[0][1] = 0.0;
+                J_xu[0][2] = 0.0;
+                J_xu[1][0] = 0.0;
+                J_xu[1][1] = 1.0;
+                J_xu[1][2] = 0.0;
+                J_xu[2][0] = 0.0;
+                J_xu[2][1] = 0.0;
+                J_xu[2][2] = 1.0;
+            }
+
+            break;
+    }
+}
+
+void u_map(double *u, double *r, double **x)
+{
+    for (int d = 0; d < n_dim; d++)
+    {
+        u[d] = 0.0;
+
+        for (int i = 0; i < n_dim + 1; i++)
+        {
+            u[d] += x[d][i] * phi[i](r);
+        }
+    }
+}
+
+void J_ur_map(double **J_ur, double *r, double **x)
+{
     double deriv[n_dim];
 
-    for (int i = 0; i < n_dim + 1; i++)
+    for (int i = 0; i < n_dim; i++)
     {
-        dphi[i](deriv, r, s);
+        for (int j = 0; j < n_dim; j++)
+        {
+            J_ur[i][j] = 0.0;
 
-        dp_dr += x[i] * deriv[0];
-        dp_ds += x[i] * deriv[1];
-        dq_dr += y[i] * deriv[0];
-        dq_ds += y[i] * deriv[1];
+            for (int k = 0; k < n_dim + 1; k++)
+            {
+                dphi[k](deriv, r);
+
+                J_ur[i][j] += x[i][k] * deriv[j];
+            }
+        }
     }
-
-    J_pr[0][0] = dp_dr;
-    J_pr[0][1] = dp_ds;
-    J_pr[1][0] = dq_dr;
-    J_pr[1][1] = dq_ds;
 }
 
 // Math Functions

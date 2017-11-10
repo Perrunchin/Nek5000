@@ -51,12 +51,10 @@ void matrix_scaling(double **, double, int, int);
 void row_scaling(double **, double **, double *, int, int);
 
 // Geometric functions
-double x_map(double, double);
-double y_map(double, double);
-void J_xp_map(double **, double, double);
-double p_map(double, double, double [], double []);
-double q_map(double, double, double [], double []);
-void J_pr_map(double **, double, double, double [], double []);
+void x_map(double *, double *);
+void J_xu_map(double **, double *);
+void u_map(double *, double *, double **);
+void J_ur_map(double **, double *, double **);
 
 // Utility functions
 template<typename DataType>
