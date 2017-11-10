@@ -402,7 +402,6 @@ void fem_matrices(double **V, long int **E, int num_elements)
 
         if (n_quad == 3)
         {
-
             q_r[0] = 1.0 / 6.0;
             q_r[1] = 2.0 / 3.0;
             q_r[2] = 1.0 / 6.0;
@@ -477,7 +476,7 @@ void fem_matrices(double **V, long int **E, int num_elements)
     // FEM Assembly process
     int E_x = num_nodes - 1;
     int E_y = num_nodes - 1;
-    int num_tri = 2;
+    int num_tri = 4;
     int ***t_map = new int**[num_tri];
 
     for (int t = 0; t < num_tri; t++)
@@ -490,18 +489,56 @@ void fem_matrices(double **V, long int **E, int num_elements)
         }
     }
 
-    t_map[0][0][0] = 0;
-    t_map[0][0][1] = 0;
-    t_map[0][1][0] = 1;
-    t_map[0][1][1] = 0;
-    t_map[0][2][0] = 1;
-    t_map[0][2][1] = 1;
-    t_map[1][0][0] = 0;
-    t_map[1][0][1] = 0;
-    t_map[1][1][0] = 1;
-    t_map[1][1][1] = 1;
-    t_map[1][2][0] = 0;
-    t_map[1][2][1] = 1;
+    if (num_tri == 2)
+    {
+        t_map[0][0][0] = 0;
+        t_map[0][0][1] = 0;
+        t_map[0][1][0] = 1;
+        t_map[0][1][1] = 0;
+        t_map[0][2][0] = 1;
+        t_map[0][2][1] = 1;
+        t_map[1][0][0] = 0;
+        t_map[1][0][1] = 0;
+        t_map[1][1][0] = 1;
+        t_map[1][1][1] = 1;
+        t_map[1][2][0] = 0;
+        t_map[1][2][1] = 1;
+    }
+    else if (num_tri == 4)
+    {
+        t_map[0][0][0] = 1;
+        t_map[0][0][1] = 0;
+        t_map[0][1][0] = 0;
+        t_map[0][1][1] = 1;
+        t_map[0][2][0] = 0;
+        t_map[0][2][1] = 0;
+
+        t_map[1][0][0] = 1;
+        t_map[1][0][1] = 1;
+        t_map[1][1][0] = 0;
+        t_map[1][1][1] = 0;
+        t_map[1][2][0] = 1;
+        t_map[1][2][1] = 0;
+
+        t_map[2][0][0] = 0;
+        t_map[2][0][1] = 1;
+        t_map[2][1][0] = 1;
+        t_map[2][1][1] = 0;
+        t_map[2][2][0] = 1;
+        t_map[2][2][1] = 1;
+
+        t_map[3][0][0] = 0;
+        t_map[3][0][1] = 0;
+        t_map[3][1][0] = 1;
+        t_map[3][1][1] = 1;
+        t_map[3][2][0] = 0;
+        t_map[3][2][1] = 1;
+    }
+    else
+    {
+        printf("Wrong number of triangles\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (int e_y = 0; e_y < E_y; e_y++)
     {
