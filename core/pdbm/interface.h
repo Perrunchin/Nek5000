@@ -33,6 +33,7 @@ extern "C"
     void compute_ranking_();
     void set_lambda_(double&);
     void set_mapping_(int&);
+    void save_mesh_data_();
 
     // Memory management functions
     void free_global_memory();

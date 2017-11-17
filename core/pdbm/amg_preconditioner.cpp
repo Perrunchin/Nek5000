@@ -7,8 +7,9 @@
 #include "amg_preconditioner.h"
 
 // C/C++ Headers
-#include <stdlib.h>
-#include <stdio.h>
+#include <iostream>
+#include <cstdlib>
+#include <cstdio>
 #include <fstream>
 
 // Hypre Headers

@@ -6,8 +6,10 @@
 
 // C/C++ Headers
 #include <iostream>
+#include <fstream>
 #include <limits>
 #include <algorithm>
+#include "mpi.h"
 
 // Global variables definition
 int n_x = 0, n_y = 0, n_z = 0, n_elem = 0, n_dim = 0;
@@ -153,6 +155,26 @@ void set_mapping_(int &mapping_)
     mapping = mapping_;
 }
 
+void save_mesh_data_()
+{
+    int rank, size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    std::ofstream file;
+    std::string name = "vertices_" + std::to_string(rank) + ".dat";
+    file.open(name);
+
+    file << n_x << " " << n_y << " " << n_z << " " << n_elem << " " << n_dim << std::endl;
+
+    for (int i = 0; i < n_x * n_y * n_z * n_elem; i++)
+    {
+        file << glo_num[i] << "\t" << press_mask[i] << "\t" << x_m[i] << "\t" << y_m[i] << std::endl;
+    }
+
+    file.close();
+
+    printf("I'm %d and I'm here\n", rank);
+}
 // Memory management functions
 void free_memory()
 {
