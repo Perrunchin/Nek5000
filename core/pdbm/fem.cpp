@@ -4,18 +4,25 @@
 // Declaration Headers
 #include "fem.h"
 #include "interface.h"
+#include "utilities.h"
 
 // C/C++ Headers
 #include <iostream>
+#include <functional>
+#include <vector>
 #include <algorithm>
-#include <cmath>
 
 // Hypre Headers
 #include "_hypre_utilities.h"
 #include "HYPRE.h"
 #include "HYPRE_parcsr_ls.h"
+#include "_hypre_parcsr_ls.h"
+
+// Namespaces
+using namespace std;
 
 // Global variables definition
+int *ranking;
 HYPRE_IJMatrix A_bc;
 HYPRE_ParCSRMatrix A_fem;
 HYPRE_IJMatrix B_bc;
@@ -26,513 +33,390 @@ HYPRE_IJVector u_bc;
 HYPRE_ParVector u_fem;
 HYPRE_IJVector Bf_bc;
 HYPRE_ParVector Bf_fem;
-double* Binv_sem = NULL;
-double* Bd_fem = NULL;
+HYPRE_IJVector Bd_bc;
+HYPRE_ParVector Bd_fem;
+HYPRE_IJVector Binv_sem_bc;
+HYPRE_ParVector Binv_sem;
+
+// Structures
+struct VertexID
+{
+    int key;
+    int value;
+    int ranking;
+};
 
 // Functions definition
 void assemble_fem_matrices_()
 {
-    // Compute mesh connectivity of the SEM matrix
-    int num_sub_elem;
-    int num_grid_points;
-    double** V_sem;
-    long int** E_sem;
-
-    mesh_connectivity(V_sem, E_sem, num_grid_points, num_sub_elem);
-
-    // Compute mesh connectivity of the FEM matrix
-    int num_fem_elem;
-    double** V_fem = V_sem;
-    long int** E_fem;
-
-    if (n_dim == 2)
-    {
-        rectangular_to_triangular(E_fem, num_fem_elem, E_sem, num_sub_elem);
-    }
-    else
-    {
-        hexahedral_to_tetrahedral(E_fem, num_fem_elem, E_sem, num_sub_elem);
-    }
-
     // Generate FEM Matrix
-    fem_matrices(V_fem, E_fem, num_fem_elem);
+    fem_matrices();
 
     // Vectors
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &u_bc);
+    int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
+    int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
+
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &u_bc);
     HYPRE_IJVectorSetObjectType(u_bc, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(u_bc);
     HYPRE_IJVectorAssemble(u_bc);
     HYPRE_IJVectorGetObject(u_bc, (void**) &u_fem);
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &f_bc);
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &f_bc);
     HYPRE_IJVectorSetObjectType(f_bc, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(f_bc);
     HYPRE_IJVectorAssemble(f_bc);
     HYPRE_IJVectorGetObject(f_bc, (void**) &f_fem);
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 0, max_rank - 1, &Bf_bc);
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Bf_bc);
     HYPRE_IJVectorSetObjectType(Bf_bc, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(Bf_bc);
     HYPRE_IJVectorAssemble(Bf_bc);
     HYPRE_IJVectorGetObject(Bf_bc, (void**) &Bf_fem);
-
-    // Free memory
-    free_double_pointer(V_sem, n_x * n_y * n_z * n_elem);
-    free_double_pointer(E_sem, num_sub_elem);
-    free_double_pointer(E_fem, num_fem_elem);
 }
 
-void set_sem_inverse_mass_matrix_(double* inv_B)
+// FEM Assembly
+void fem_matrices()
 {
     /*
-     * Create Epetra_Vector for inv_B_sem
+     * Assembles the FEM matrices from SEM meshes
+     *
+     * Returns A_fem and B_fem
      */
-    Binv_sem = new double[n_x * n_y * n_z * n_elem];
+    // MPI Information
+    int rank, size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    for (int i = 0; i < n_x * n_y * n_z * n_elem; i++)
+    // Find the maximum vertex id which indicates the number of rows in the full FEM matrices
+    int loc_max = 0;
+    int num_vert;
+
+    for (int e = 0; e < n_elem; e++)
     {
-        Binv_sem[i] = inv_B[i];
-    }
-}
-
-void mesh_connectivity(double**& V_sem, long int**& E_sem, int& num_grid_points, int& num_sub_elem)
-{
-    /*
-     * Computes the mesh connectivity of the SEM mesh including GLL points
-     */
-    // Vertices allocation
-    num_grid_points = n_x * n_y * n_z * n_elem;
-
-    V_sem = new double*[num_grid_points];
-
-    for (int i = 0; i < num_grid_points; i++)
-    {
-        V_sem[i] = new double[n_dim];
+        for (int idx = 0; idx < n_x * n_y * n_z; idx++)
+        {
+            loc_max = max(loc_max, (int) glo_num[e][idx]);
+        }
     }
 
-    // Elements allocation
+    MPI_Allreduce(&loc_max, &num_vert, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    num_vert++;
+
+    // Assemble full FEM matrices without boundary conditions
+    int num_rows = (num_vert + (size - 1)) / size;
+    int idx_start = rank * num_rows;
+    int idx_end = (rank + 1) * num_rows - 1;
+
+    if (rank == size - 1)
+    {
+        idx_end = num_vert - 1;
+    }
+
+    num_rows = (idx_end + 1) - idx_start;
+
+    HYPRE_IJMatrix A_f;
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start, idx_end, idx_start, idx_end, &A_f);
+    HYPRE_IJMatrixSetObjectType(A_f, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(A_f);
+
+    HYPRE_IJMatrix B_f;
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start, idx_end, idx_start, idx_end, &B_f);
+    HYPRE_IJMatrixSetObjectType(B_f, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(B_f);
+
+    // Set quadrature rule
+    int n_quad = (n_dim == 2) ? 3 : 4;
+    double **q_r;
+    double *q_w;
+
+    quadrature_rule(q_r, q_w, n_quad, n_dim);
+
+    // Mesh connectivity
+    int num_fem = (n_dim == 2) ? 4 : 8;
+    int **v_coord;
+    int **t_map;
+
+    mesh_connectivity(v_coord, t_map, num_fem, n_dim);
+
+    // Finite element assembly
+    double **A_loc = mem_alloc<double>(n_dim + 1, n_dim + 1);
+    double **B_loc = mem_alloc<double>(n_dim + 1, n_dim + 1);
+    double **J_xr = mem_alloc<double>(n_dim, n_dim);
+    double **J_rx = mem_alloc<double>(n_dim, n_dim);
+    double **x_t = mem_alloc<double>(n_dim, n_dim + 1);
+    double *q_x = mem_alloc<double>(n_dim);
+
+    vector<function<double (double*)>> phi;
+    vector<function<void (double*, double*)>> dphi;
+
     if (n_dim == 2)
     {
-        num_sub_elem = (n_x - 1) * (n_y - 1) * n_elem;
+        phi.push_back([] (double *r) { return r[0]; });
+        phi.push_back([] (double *r) { return r[1]; });
+        phi.push_back([] (double *r) { return 1.0 - r[0] - r[1]; });
+
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 1.0; dp[1] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 1.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = -1.0; dp[1] = -1.0; });
     }
     else
     {
-        num_sub_elem = (n_x - 1) * (n_y - 1) * (n_z - 1) * n_elem;
+        phi.push_back([] (double *r) { return r[0]; });
+        phi.push_back([] (double *r) { return r[1]; });
+        phi.push_back([] (double *r) { return r[2]; });
+        phi.push_back([] (double *r) { return 1.0 - r[0] - r[1] - r[2]; });
+
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 1.0; dp[1] = 0.0; dp[2] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 1.0; dp[2] = 0.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = 0.0; dp[1] = 0.0; dp[2] = 1.0; });
+        dphi.push_back([] (double *dp, double *r) { dp[0] = -1.0; dp[1] = -1.0; dp[2] = -1.0; });
     }
 
-    int num_vertices = std::pow(2, n_dim);
-
-    E_sem = new long int*[num_sub_elem];
-
-    for (int i = 0; i < num_sub_elem; i++)
-    {
-        E_sem[i] = new long int[num_vertices];
-    }
-
-    // Vertices generation
-    for (int e = 0; e < n_elem; e++)
-    {
-        for (int ijk = 0; ijk < n_x * n_y * n_z; ijk++)
-        {
-            int grid_point = ijk + e * (n_x * n_y * n_z);
-
-            if (n_dim == 2)
-            {
-                V_sem[grid_point][0] = x_m[grid_point];
-                V_sem[grid_point][1] = y_m[grid_point];
-            }
-            else
-            {
-                V_sem[grid_point][0] = x_m[grid_point];
-                V_sem[grid_point][1] = y_m[grid_point];
-                V_sem[grid_point][2] = z_m[grid_point];
-            }
-        }
-    }
-
-    // Elements generation
-    num_sub_elem = 0;
+    int E_x = n_x - 1;
+    int E_y = n_y - 1;
+    int E_z = (n_dim == 2) ? 1 : n_z - 1;
 
     for (int e = 0; e < n_elem; e++)
     {
-        int elem = e * (n_x * n_y * n_z);
-
-        if (n_dim == 2)
+        // Cycle through collocated quads/hexes
+        for (int s_z = 0; s_z < E_z; s_z++)
         {
-            for (int j = 0; j < n_y - 1; j++)
+            for (int s_y = 0; s_y < E_y; s_y++)
             {
-                for (int i = 0; i < n_x - 1; i++)
+                for (int s_x = 0; s_x < E_x; s_x++)
                 {
-                    int v_1 = i + j * n_x + elem;
-                    int v_2 = (i + 1) + j * n_x + elem;
-                    int v_3 = i + (j + 1) * n_x + elem;
-                    int v_4 = (i + 1) + (j + 1) * n_x + elem;
+                    // Get indices
+                    int s[n_dim];
 
-                    E_sem[num_sub_elem][0] = v_1;
-                    E_sem[num_sub_elem][1] = v_2;
-                    E_sem[num_sub_elem][2] = v_3;
-                    E_sem[num_sub_elem][3] = v_4;
-
-                    num_sub_elem++;
-                }
-            }
-        }
-        else
-        {
-            for (int k = 0; k < n_z - 1; k++)
-            {
-                for (int j = 0; j < n_y - 1; j++)
-                {
-                    for (int i = 0; i < n_x - 1; i++)
+                    if (n_dim == 2)
                     {
-                        int v_1 = i + j * n_x + k * (n_x * n_y) + elem;
-                        int v_2 = (i + 1) + j * n_x + k * (n_x * n_y) + elem;
-                        int v_3 = i + (j + 1) * n_x + k * (n_x * n_y) + elem;
-                        int v_4 = (i + 1) + (j + 1) * n_x + k * (n_x * n_y) + elem;
-                        int v_5 = i + j * n_x + (k + 1) * (n_x * n_y) + elem;
-                        int v_6 = (i + 1) + j * n_x + (k + 1) * (n_x * n_y) + elem;
-                        int v_7 = i + (j + 1) * n_x + (k + 1) * (n_x * n_y) + elem;
-                        int v_8 = (i + 1) + (j + 1) * n_x + (k + 1) * (n_x * n_y) + elem;
+                        s[0] = s_x;
+                        s[1] = s_y;
+                    }
+                    else
+                    {
+                        s[0] = s_x;
+                        s[1] = s_y;
+                        s[2] = s_z;
+                    }
 
-                        E_sem[num_sub_elem][0] = v_1;
-                        E_sem[num_sub_elem][1] = v_2;
-                        E_sem[num_sub_elem][2] = v_3;
-                        E_sem[num_sub_elem][3] = v_4;
-                        E_sem[num_sub_elem][4] = v_5;
-                        E_sem[num_sub_elem][5] = v_6;
-                        E_sem[num_sub_elem][6] = v_7;
-                        E_sem[num_sub_elem][7] = v_8;
+                    int idx[int(pow(2, n_dim))] = { 0 };
 
-                        num_sub_elem++;
+                    for (int i = 0; i < pow(2, n_dim); i++)
+                    {
+                        for (int d = 0; d < n_dim; d++)
+                        {
+                            idx[i] += (s[d] + v_coord[i][d]) * pow(n_x, d);
+                        }
+                    }
+
+                    // Cycle through collocated triangles/tets
+                    for (int t = 0; t < num_fem; t++)
+                    {
+                        // Get vertices
+                        for (int i = 0; i < n_dim + 1; i++)
+                        {
+                            for (int d = 0; d < n_dim; d++)
+                            {
+                                x_t[d][i] = mesh[e][d][idx[t_map[t][i]]];
+                            }
+                        }
+
+                        // Local FEM matrices
+                        // Reset local stiffness and mass matrices
+                        for (int i = 0; i < n_dim + 1; i++)
+                        {
+                            for (int j = 0; j < n_dim + 1; j++)
+                            {
+                                A_loc[i][j] = 0.0;
+                                B_loc[i][j] = 0.0;
+                            }
+                        }
+
+                        // Build local stiffness matrices by applying quadrature rules
+                        for (int q = 0; q < n_quad; q++)
+                        {
+                            // From r to x
+                            x_map(q_x, q_r[q], x_t, n_dim, phi);
+                            J_xr_map(J_xr, q_r[q], x_t, n_dim, dphi);
+                            inverse(J_rx, J_xr, n_dim);
+                            double det_J_xr = determinant(J_xr, n_dim);
+
+                            // Integrand
+                            for (int i = 0; i < n_dim + 1; i++)
+                            {
+                                for (int j = 0; j < n_dim + 1; j++)
+                                {
+                                    double func = 0.0;
+
+                                    for (int alpha = 0; alpha < n_dim; alpha++)
+                                    {
+                                        double a = 0.0, b = 0.0;
+
+                                        for (int beta = 0; beta < n_dim; beta++)
+                                        {
+                                            double dp[n_dim];
+
+                                            dphi[i](dp, q_r[q]);
+                                            a += dp[beta] * J_rx[beta][alpha];
+
+                                            dphi[j](dp, q_r[q]);
+                                            b += dp[beta] * J_rx[beta][alpha];
+                                        }
+
+                                        func += a * b;
+                                    }
+
+                                    A_loc[i][j] += func * det_J_xr * q_w[q];
+                                    B_loc[i][j] += phi[i](q_r[q]) * phi[j](q_r[q]) * det_J_xr * q_w[q];
+                                }
+                            }
+                        }
+
+                        // Add to global matrix
+                        for (int i = 0; i < n_dim + 1; i++)
+                        {
+                            for (int j = 0; j < n_dim + 1; j++)
+                            {
+                                int row = glo_num[e][idx[t_map[t][i]]];
+                                int col = glo_num[e][idx[t_map[t][j]]];
+
+                                double A_val = A_loc[i][j];
+                                double B_val = B_loc[i][j];
+
+                                int ncols = 1;
+                                int insert_error;
+
+                                if (std::abs(A_val) > 1.0e-14)
+                                {
+                                    insert_error = HYPRE_IJMatrixAddToValues(A_f, 1, &ncols, &row, &col, &A_val);
+                                }
+
+                                if (std::abs(B_val) > 1.0e-14)
+                                {
+                                    insert_error = HYPRE_IJMatrixAddToValues(B_f, 1, &ncols, &row, &col, &B_val);
+                                }
+
+                                if (insert_error != 0)
+                                {
+                                    printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-}
 
-void rectangular_to_triangular(long int**& E_fem, int& num_fem_elem, long int** E_sem, int num_sub_elem)
-{
-    /*
-     * Computes the triangular elements from a rectangular mesh
-     */
-    // Allocate element array
-    const int tri_per_elem = 2;
-    //const int tri_per_elem = 4;
+    HYPRE_IJMatrixAssemble(A_f);
+    HYPRE_IJMatrixAssemble(B_f);
 
-    num_fem_elem = tri_per_elem * num_sub_elem;
+    HYPRE_IJMatrixPrint(A_f, "A_f");
+    HYPRE_IJMatrixPrint(B_f, "B_f");
 
-    E_fem = new long int*[num_fem_elem];
+    // Rank vertices after boundary conditions are removed
+    int bc_ids[n_elem * n_x * n_y * n_z];
 
-    for (int i = 0; i < num_fem_elem; i++)
+    for (int e = 0; e < n_elem; e++)
     {
-        E_fem[i] = new long int[3];
-    }
-
-    // Generate triangles
-    int mapping[tri_per_elem][3] = {{0, 1, 3}, {0, 3, 2}};
-    //int mapping[tri_per_elem][3] = {{0, 1, 2}, {1, 3, 0}, {2, 0, 3}, {3, 2, 1}};
-
-    for (int e = 0; e < num_sub_elem; e++)
-    {
-        for (int i = 0; i < tri_per_elem; i++)
+        for (int i = 0; i < n_x * n_y * n_z; i++)
         {
-            E_fem[tri_per_elem * e + i][0] = E_sem[e][mapping[i][0]];
-            E_fem[tri_per_elem * e + i][1] = E_sem[e][mapping[i][1]];
-            E_fem[tri_per_elem * e + i][2] = E_sem[e][mapping[i][2]];
-        }
-    }
-}
+            int idx = i + e * (n_x * n_y * n_z);
 
-void hexahedral_to_tetrahedral(long int**& E_fem, int& num_fem_elem, long int** E_sem, int num_sub_elem)
-{
-    /*
-     * Computes the tetrahedral elements from a hexahedral mesh
-     */
-    // Allocate element array
-    //const int tet_per_elem = 6;
-    const int tet_per_elem = 8;
-    //const int tet_per_elem = 16;
-
-    //int mapping[tet_per_elem][n_dim + 1] = {{0, 2, 1, 5}, {1, 2, 3, 5}, {0, 4, 2, 5}, {5, 3, 7, 2}, {4, 5, 6, 2}, {5, 7, 6, 2}};
-    int mapping[tet_per_elem][n_dim + 1] = {{0, 2, 1, 4}, {1, 0, 3, 5}, {2, 6, 3, 0}, {3, 2, 7, 1}, {4, 5, 6, 0}, {5, 7, 4, 1}, {6, 7, 2, 4}, {7, 3, 6, 5}};
-    //int mapping[tet_per_elem][n_dim + 1] = {{0, 2, 1, 4}, {1, 0, 3, 5}, {2, 6, 3, 0}, {3, 2, 7, 1}, {4, 5, 6, 0}, {5, 7, 4, 1}, {6, 7, 2, 4}, {7, 3, 6, 5}, {0, 2, 1, 7}, {1, 0, 3, 6}, {2, 6, 3, 5}, {3, 2, 7, 4}, {4, 5, 6, 3}, {5, 7, 4, 2}, {6, 7, 2, 1}, {7, 3, 6, 0}};
-
-    num_fem_elem = tet_per_elem * num_sub_elem;
-
-    E_fem = new long int*[num_fem_elem];
-
-    for (int i = 0; i < num_fem_elem; i++)
-    {
-        E_fem[i] = new long int[4];
-    }
-
-    // Generate tetrahedrals
-    for (int e = 0; e < num_sub_elem; e++)
-    {
-        for (int i = 0; i < tet_per_elem; i++)
-        {
-            E_fem[tet_per_elem * e + i][0] = E_sem[e][mapping[i][0]];
-            E_fem[tet_per_elem * e + i][1] = E_sem[e][mapping[i][1]];
-            E_fem[tet_per_elem * e + i][2] = E_sem[e][mapping[i][2]];
-            E_fem[tet_per_elem * e + i][3] = E_sem[e][mapping[i][3]];
-        }
-    }
-}
-
-// FEM Assembly
-void fem_matrices(double** V, long int** E, int num_elements)
-{
-    /*
-     * Assembles the FEM matrices from (V, E)
-     *
-     * Returns A_fem and B_fem
-     */
-    // Create full matrix
-    int num_vertices = *std::max_element(glo_num, glo_num + n_x * n_y * n_z * n_elem) + 1;
-
-    HYPRE_IJMatrix A_full;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_vertices - 1, 0, num_vertices - 1, &A_full);
-    HYPRE_IJMatrixSetObjectType(A_full, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(A_full);
-
-    HYPRE_IJMatrix B_full;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_vertices - 1, 0, num_vertices - 1, &B_full);
-    HYPRE_IJMatrixSetObjectType(B_full, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_full);
-
-    // FEM Variables
-    double** elem_vert = allocate_double_pointer<double>(n_dim + 1, n_dim);
-    double** A_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** B_loc = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** J = allocate_double_pointer<double>(n_dim, n_dim);
-    double** inv_J = allocate_double_pointer<double>(n_dim, n_dim);
-    double det_J;
-
-    // Quadrature rule
-    int n_quad;
-    double* q_r;
-    double* q_s;
-    double* q_t;
-    double* q_w;
-    double q_omega;
-
-    if (n_dim == 2)
-    {
-        n_quad = 3;
-        q_r = new double[n_quad];
-        q_s = new double[n_quad];
-        q_t = new double[n_quad];
-        q_w = new double[n_quad];
-
-        q_r[0] = 1.0 / 6.0;
-        q_r[1] = 2.0 / 3.0;
-        q_r[2] = 1.0 / 6.0;
-
-        q_s[0] = 1.0 / 6.0;
-        q_s[1] = 1.0 / 6.0;
-        q_s[2] = 2.0 / 3.0;
-
-        q_t[0] = 0.0;
-        q_t[1] = 0.0;
-        q_t[2] = 0.0;
-
-        q_w[0] = 1.0 / 6.0;
-        q_w[1] = 1.0 / 6.0;
-        q_w[2] = 1.0 / 6.0;
-
-        q_omega = 1.0 / 2.0;
-    }
-    else
-    {
-        n_quad = 4;
-        q_r = new double[n_quad];
-        q_s = new double[n_quad];
-        q_t = new double[n_quad];;
-        q_w = new double[n_quad];
-
-        double a = (5.0 + 3.0 * sqrt(5.0)) / 20.0;
-        double b = (5.0 - sqrt(5.0)) / 20.0;
-
-        q_r[0] = a;
-        q_r[1] = b;
-        q_r[2] = b;
-        q_r[3] = b;
-
-        q_s[0] = b;
-        q_s[1] = a;
-        q_s[2] = b;
-        q_s[3] = b;
-
-        q_t[0] = b;
-        q_t[1] = b;
-        q_t[2] = a;
-        q_t[3] = b;
-
-        q_w[0] = 1.0 / 24.0;
-        q_w[1] = 1.0 / 24.0;
-        q_w[2] = 1.0 / 24.0;
-        q_w[3] = 1.0 / 24.0;
-
-        q_omega = 1.0 / 6.0;
-    }
-
-    // Basis functions derivatives
-    double** phi = allocate_double_pointer<double>(n_quad, n_dim + 1, 0.0);
-    double** d_phi = allocate_double_pointer<double>(n_dim + 1, n_dim, 0.0);
-    double** d_phi_inv_J = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-    double** w_phi = allocate_double_pointer<double>(n_dim + 1, n_dim + 1);
-
-    for (int k = 0; k < n_dim; k++)
-    {
-        d_phi[k][k] = 1.0;
-        d_phi[n_dim][k] = -1.0;
-    }
-
-    for (int k = 0; k < n_quad; k++)
-    {
-        if (n_dim == 2)
-        {
-            phi[k][0] = q_r[k];
-            phi[k][1] = q_s[k];
-            phi[k][2] = 1.0 - q_r[k] - q_s[k];
-        }
-        else
-        {
-            phi[k][0] = q_r[k];
-            phi[k][1] = q_s[k];
-            phi[k][2] = q_t[k];
-            phi[k][3] = 1.0 - q_r[k] - q_s[k] - q_t[k];
-        }
-    }
-
-    // FEM Assembly process
-    for (int e = 0; e < num_elements; e++)
-    {
-        // Element vertices
-        for (int i = 0; i < n_dim + 1; i++)
-        {
-            for (int j = 0; j < n_dim; j++)
+            if (press_mask[e][i] == 0)
             {
-                elem_vert[i][j] = V[E[e][i]][j];
+                bc_ids[idx] = num_vert;
             }
-        }
-
-        // Jacobian
-        for (int i = 0; i < n_dim; i++)
-        {
-            for (int j = 0; j < n_dim; j++)
+            else
             {
-                J[i][j] = elem_vert[j][i] - elem_vert[n_dim][i];
-            }
-        }
-
-        det_J = determinant(J, n_dim);
-        inverse(inv_J, J, n_dim, det_J);
-
-        // Local stiffness matrix
-        matrix_matrix_mul(d_phi_inv_J, d_phi, inv_J, n_dim + 1, n_dim, n_dim, false, false);
-        matrix_matrix_mul(A_loc, d_phi_inv_J, d_phi_inv_J, n_dim + 1, n_dim + 1, n_dim, false, true);
-        matrix_scaling(A_loc, det_J * q_omega, n_dim + 1, n_dim + 1);
-
-        // Local mass matrix
-        row_scaling(w_phi, phi, q_w, n_quad, n_dim + 1);
-        matrix_matrix_mul(B_loc, phi, w_phi, n_dim + 1, n_dim + 1, n_quad, true, false);
-        matrix_scaling(B_loc, det_J, n_dim + 1, n_dim + 1);
-
-        // Add to global matrix
-        for (int i = 0; i < n_dim + 1; i++)
-        {
-            for (int j = 0; j < n_dim + 1; j++)
-            {
-                int row = glo_num[E[e][i]];
-                int col = glo_num[E[e][j]];
-                double A_val = A_loc[i][j];
-                double B_val = B_loc[i][j];
-
-                int ncols = 1;
-                int insert_error;
-
-                if (std::abs(A_val) > 1.0e-14)
-                {
-                    insert_error = HYPRE_IJMatrixAddToValues(A_full, 1, &ncols, &row, &col, &A_val);
-                }
-
-                if (std::abs(B_val) > 1.0e-14)
-                {
-                    insert_error = HYPRE_IJMatrixAddToValues(B_full, 1, &ncols, &row, &col, &B_val);
-                }
-
-                if (insert_error != 0)
-                {
-                    printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
-                    exit(EXIT_FAILURE);
-                }
+                bc_ids[idx] = glo_num[e][i];
             }
         }
     }
 
-    // Assemble full matrix
-    HYPRE_IJMatrixAssemble(A_full);
-    HYPRE_IJMatrixAssemble(B_full);
+    ranking = mem_alloc<int>(n_elem * n_x * n_y * n_z);
 
-//    HYPRE_IJMatrixPrint(A_full, "A_t");
-//    HYPRE_IJMatrixPrint(B_full, "B_t");
-//
-//    exit(EXIT_SUCCESS);
+    parallel_ranking(ranking, bc_ids, n_elem * n_x * n_y * n_z, num_vert);
 
-    // Get index of glo_num
-    std::vector<std::pair<long int, long int>> glo_num_pair;
+    // Notify each processor of what rows are to be removed
+    // TODO: Update implementation to make it more efficient
+    int glo_ranking[num_vert] = { 0 };
 
-    for (int i = 0; i < n_x * n_y * n_z * n_elem; i++)
+    for (int e = 0; e < n_elem; e++)
     {
-        glo_num_pair.push_back(std::pair<long int, long int>(glo_num[i], i));
-    }
-
-    std::sort(glo_num_pair.begin(), glo_num_pair.end());
-
-    int id = 1;
-    long int* glo_num_index = new long int[num_vertices]; // Vertex "i" is in position "glo_num_index[i]" in "glo_num"
-
-    glo_num_index[0] = glo_num_pair[0].second;
-
-    for (int i = 1; i < n_x * n_y * n_z * n_elem; i++)
-    {
-        if (glo_num_pair[i - 1].first != glo_num_pair[i].first)
+        for (int i = 0; i < n_x * n_y * n_z; i++)
         {
-            glo_num_index[id] = glo_num_pair[i].second;
+            int idx = i + e * (n_x * n_y * n_z);
 
-            id++;
+            glo_ranking[glo_num[e][i]] = ranking[idx] + 1;
         }
     }
 
-    // Extract CRS arrays and apply Dirichlet boundary conditions
-    long int num_rows = max_rank;
+    MPI_Allreduce(MPI_IN_PLACE, glo_ranking, num_vert, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &A_bc);
+    for (int i = 0; i < num_vert; i++)
+    {
+        glo_ranking[i]--;
+    }
+
+    // Number of unique vertices after boundary conditions are applied
+    loc_max = 0;
+
+    for (int i = 0; i < n_elem * n_x * n_y * n_z; i++)
+    {
+        loc_max = max(loc_max, ranking[i]);
+    }
+
+    int num_vert_bc;
+
+    MPI_Allreduce(&loc_max, &num_vert_bc, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    num_vert_bc += 1;
+
+    int num_rows_bc = (num_vert_bc + (size - 1)) / size;
+    int idx_start_bc = rank * num_rows_bc;
+    int idx_end_bc = (rank + 1) * num_rows_bc - 1;
+
+    if (rank == size - 1)
+    {
+        idx_end_bc = num_vert_bc - 1;
+    }
+
+    num_rows_bc = (idx_end_bc + 1) - idx_start_bc;
+
+    // Assemble FE matrices with boundaries removed
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &A_bc);
     HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(A_bc);
 
-    HYPRE_ParCSRMatrix A_full_csr;
-    HYPRE_IJMatrixGetObject(A_full, (void**) &A_full_csr);
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &B_bc);
+    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(B_bc);
 
-    for (int i = 0; i < num_vertices; i++)
+    HYPRE_ParCSRMatrix A_f_csr;
+    HYPRE_ParCSRMatrix B_f_csr;
+    HYPRE_IJMatrixGetObject(A_f, (void**) &A_f_csr);
+    HYPRE_IJMatrixGetObject(B_f, (void**) &B_f_csr);
+
+    for (int i = idx_start; i <= idx_end; i++)
     {
-        int row = ranking[glo_num_index[i]];
+        int row = glo_ranking[i];
 
-        if (row < num_rows)
+        if (row >= 0)
         {
-            int ncols;
+            int n_cols;
             int* cols;
             double* values;
 
-            HYPRE_ParCSRMatrixGetRow(A_full_csr, i, &ncols, &cols, &values);
+            HYPRE_ParCSRMatrixGetRow(A_f_csr, i, &n_cols, &cols, &values);
 
-            for (int j = 0; j < ncols; j++)
+            for (int j = 0; j < n_cols; j++)
             {
-                int col = ranking[glo_num_index[cols[j]]];
+                int col = glo_ranking[cols[j]];
 
-                if (col < num_rows)
+                if (col >= 0)
                 {
                     int num_cols = 1;
                     int insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &num_cols, &row, &col, values + j);
@@ -545,111 +429,498 @@ void fem_matrices(double** V, long int** E, int num_elements)
                 }
             }
 
-            HYPRE_ParCSRMatrixRestoreRow(A_full_csr, i, &ncols, &cols, &values);
-        }
-    }
+            HYPRE_ParCSRMatrixRestoreRow(A_f_csr, i, &n_cols, &cols, &values);
 
-    HYPRE_IJMatrixAssemble(A_bc);
+            HYPRE_ParCSRMatrixGetRow(B_f_csr, i, &n_cols, &cols, &values);
 
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 0, num_rows - 1, 0, num_rows - 1, &B_bc);
-    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_bc);
-
-    HYPRE_ParCSRMatrix B_full_csr;
-    HYPRE_IJMatrixGetObject(B_full, (void**) &B_full_csr);
-
-    for (int i = 0; i < num_vertices; i++)
-    {
-        int row = ranking[glo_num_index[i]];
-
-        if (row < num_rows)
-        {
-            int ncols;
-            int* cols;
-            double* values;
-
-            HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
-
-            for (int j = 0; j < ncols; j++)
+            for (int j = 0; j < n_cols; j++)
             {
-                int col = ranking[glo_num_index[cols[j]]];
+                int col = glo_ranking[cols[j]];
 
-                if (col < num_rows)
+                if (col >= 0)
                 {
                     int num_cols = 1;
                     int insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &num_cols, &row, &col, values + j);
 
                     if (insert_error != 0)
                     {
-                        printf("There was an error with entry B_fem(%d, %d) = %f\n", row, col, values[j]);
+                        printf("There was an error with entry A_fem(%d, %d) = %f\n", row, col, values[j]);
                         exit(EXIT_FAILURE);
                     }
                 }
             }
 
-            HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+            HYPRE_ParCSRMatrixRestoreRow(B_f_csr, i, &n_cols, &cols, &values);
         }
     }
 
+    HYPRE_IJMatrixAssemble(A_bc);
+    HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
+
     HYPRE_IJMatrixAssemble(B_bc);
+    HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
 
     // Build diagonal mass matrix with full mass matrix without boundary conditions
-    double* Bd_sum = new double[num_vertices];
+    double *Bd_sum = mem_alloc<double>(num_rows);
 
-    for (int i = 0; i < num_vertices; i++)
+    for (int i = idx_start; i <= idx_end; i++)
     {
-        int ncols;
+        int n_cols;
         int* cols;
         double* values;
 
-        HYPRE_ParCSRMatrixGetRow(B_full_csr, i, &ncols, &cols, &values);
+        HYPRE_ParCSRMatrixGetRow(B_f_csr, i, &n_cols, &cols, &values);
 
-        Bd_sum[i] = 0.0;
+        Bd_sum[i - idx_start] = 0.0;
 
-        for (int j = 0; j < ncols; j++)
+        for (int j = 0; j < n_cols; j++)
         {
-            Bd_sum[i] += values[j];
+            Bd_sum[i - idx_start] += values[j];
         }
 
-        HYPRE_ParCSRMatrixRestoreRow(B_full_csr, i, &ncols, &cols, &values);
+        HYPRE_ParCSRMatrixRestoreRow(B_f_csr, i, &n_cols, &cols, &values);
     }
 
-    Bd_fem = new double[num_rows];
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, &Bd_bc);
+    HYPRE_IJVectorSetObjectType(Bd_bc, HYPRE_PARCSR);
+    HYPRE_IJVectorInitialize(Bd_bc);
 
-    for (int i = 0; i < num_vertices; i++)
+    for (int i = idx_start; i <= idx_end; i++)
     {
-        int row = ranking[glo_num_index[i]];
+        int row = glo_ranking[i];
 
-        if (row < num_rows)
+        if (row >= 0)
         {
-            Bd_fem[row] = Bd_sum[i];
+            HYPRE_IJVectorSetValues(Bd_bc, 1, &row, &Bd_sum[i - idx_start]);
         }
     }
 
-    // Create ParCSR objects
-    HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
-    HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
-
-    //HYPRE_IJMatrixPrint(A_bc, "A_bc.pdbm");
+    HYPRE_IJVectorAssemble(Bd_bc);
+    HYPRE_IJVectorGetObject(Bd_bc, (void**) &Bd_fem);
 
     // Free memory
-    HYPRE_IJMatrixDestroy(A_full);
-    HYPRE_IJMatrixDestroy(B_full);
-    delete[] glo_num_index;
-    delete[] q_w;
-    delete[] q_r;
-    delete[] q_s;
-    delete[] q_t;
-    delete[] Bd_sum;
-    free_double_pointer(elem_vert, n_dim + 1);
-    free_double_pointer(A_loc, n_dim + 1);
-    free_double_pointer(B_loc, n_dim + 1);
-    free_double_pointer(J, n_dim);
-    free_double_pointer(inv_J, n_dim);
-    free_double_pointer(phi, n_quad);
-    free_double_pointer(d_phi, n_dim + 1);
-    free_double_pointer(d_phi_inv_J, n_dim + 1);
-    free_double_pointer(w_phi, n_dim + 1);
+    mem_free<double>(q_r, n_quad, n_dim);
+    mem_free<double>(q_w, n_quad);
+    mem_free<int>(v_coord, pow(n_dim, 2), n_dim);
+    mem_free<int>(t_map, num_fem, n_dim + 1);
+    mem_free<double>(A_loc, n_dim + 1, n_dim + 1);
+    mem_free<double>(B_loc, n_dim + 1, n_dim + 1);
+    mem_free<double>(J_xr, n_dim, n_dim);
+    mem_free<double>(J_rx, n_dim, n_dim);
+    mem_free<double>(x_t, n_dim, n_dim);
+    mem_free<double>(q_x, n_dim);
+    HYPRE_IJMatrixDestroy(A_f);
+    HYPRE_IJMatrixDestroy(B_f);
+}
+
+void set_sem_inverse_mass_matrix_(double* inv_B)
+{
+    /*
+     * Build parallel vector of inverse of SEM mass matrix
+     */
+    int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
+    int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
+    int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
+
+    double inv_B_array[num_rows] = { 0 };
+
+    for (int e = 0; e < n_elem; e++)
+    {
+        for (int i = 0; i < n_x * n_y * n_z; i++)
+        {
+            int idx = i + e * (n_x * n_y * n_z);
+            int row = ranking[idx];
+
+            if (row >= 0)
+            {
+                inv_B_array[row] = inv_B[idx];
+            }
+        }
+    }
+
+    MPI_Allreduce(MPI_IN_PLACE, inv_B_array, num_rows, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Binv_sem_bc);
+    HYPRE_IJVectorSetObjectType(Binv_sem_bc, HYPRE_PARCSR);
+    HYPRE_IJVectorInitialize(Binv_sem_bc);
+    HYPRE_IJVectorAssemble(Binv_sem_bc);
+    HYPRE_IJVectorGetObject(Binv_sem_bc, (void**) &Binv_sem);
+
+    for (int i = row_start; i <= row_end; i++)
+    {
+        HYPRE_IJVectorSetValues(Binv_sem_bc, 1, &i, &inv_B_array[i]);
+    }
+}
+
+void quadrature_rule(double **&q_r, double *&q_w, int n_quad, int n_dim)
+{
+    q_r = mem_alloc<double>(n_quad, n_dim);
+    q_w = mem_alloc<double>(n_quad);
+
+    if (n_dim == 2)
+    {
+        if (n_quad == 3)
+        {
+            q_r[0][0] = 1.0 / 6.0; q_r[0][1] = 1.0 / 6.0;
+            q_r[1][0] = 2.0 / 3.0; q_r[1][1] = 1.0 / 6.0;
+            q_r[2][0] = 1.0 / 6.0; q_r[2][1] = 2.0 / 3.0;
+
+            q_w[0] = 1.0 / 6.0;
+            q_w[1] = 1.0 / 6.0;
+            q_w[2] = 1.0 / 6.0;
+        }
+        else if (n_quad == 4)
+        {
+            q_r[0][0] = 1.0 / 3.0; q_r[0][1] = 1.0 / 3.0;
+            q_r[1][0] = 1.0 / 5.0; q_r[1][1] = 3.0 / 5.0;
+            q_r[2][0] = 1.0 / 5.0; q_r[2][1] = 1.0 / 5.0;
+            q_r[3][0] = 3.0 / 5.0; q_r[3][1] = 1.0 / 5.0;
+
+            q_w[0] = - 27.0 / 96.0;
+            q_w[1] = 25.0 / 96.0;
+            q_w[2] = 25.0 / 96.0;
+            q_w[3] = 25.0 / 96.0;
+        }
+        else
+        {
+            printf("No quadrature rule for %d points available\n", n_quad);
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        if (n_quad == 4)
+        {
+            double a = (5.0 + 3.0 * sqrt(5.0)) / 20.0;
+            double b = (5.0 - sqrt(5.0)) / 20.0;
+
+            q_r[0][0] = a; q_r[0][1] = b; q_r[0][2] = b;
+            q_r[1][0] = b; q_r[1][1] = a; q_r[1][2] = b;
+            q_r[2][0] = b; q_r[2][1] = b; q_r[2][2] = a;
+            q_r[3][0] = b; q_r[3][1] = b; q_r[3][2] = b;
+
+            q_w[0] = 1.0 / 24.0;
+            q_w[1] = 1.0 / 24.0;
+            q_w[2] = 1.0 / 24.0;
+            q_w[3] = 1.0 / 24.0;
+        }
+        else if (n_quad == 5)
+        {
+            q_r[0][0] = 1.0 / 2.0; q_r[0][1] = 1.0 / 6.0; q_r[0][2] = 1.0 / 6.0;
+            q_r[1][0] = 1.0 / 6.0; q_r[1][1] = 1.0 / 2.0; q_r[1][2] = 1.0 / 6.0;
+            q_r[2][0] = 1.0 / 6.0; q_r[2][1] = 1.0 / 6.0; q_r[2][2] = 1.0 / 2.0;
+            q_r[3][0] = 1.0 / 6.0; q_r[3][1] = 1.0 / 6.0; q_r[3][2] = 1.0 / 6.0;
+            q_r[4][0] = 1.0 / 4.0; q_r[4][1] = 1.0 / 4.0; q_r[4][2] = 1.0 / 4.0;
+
+            q_w[0] = 9.0 / 20.0;
+            q_w[1] = 9.0 / 20.0;
+            q_w[2] = 9.0 / 20.0;
+            q_w[3] = 9.0 / 20.0;
+            q_w[4] = - 4.0 / 5.0;
+        }
+        else
+        {
+            printf("No quadrature rule for %d points available\n", n_quad);
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void mesh_connectivity(int **&v_coord, int **&t_map, int num_fem, int n_dim)
+{
+    v_coord = mem_alloc<int>(pow(n_dim, 2), n_dim);
+    t_map = mem_alloc<int>(num_fem, n_dim + 1);
+
+    if (n_dim == 2)
+    {
+        v_coord[0][0] = 0; v_coord[0][1] = 0;
+        v_coord[1][0] = 1; v_coord[1][1] = 0;
+        v_coord[2][0] = 0; v_coord[2][1] = 1;
+        v_coord[3][0] = 1; v_coord[3][1] = 1;
+
+        if (num_fem == 2)
+        {
+            t_map[0][0] = 0; t_map[0][1] = 1; t_map[0][2] = 3;
+            t_map[1][0] = 0; t_map[1][1] = 3; t_map[1][2] = 2;
+        }
+        else if (num_fem == 4)
+        {
+            t_map[0][0] = 1; t_map[0][1] = 2; t_map[0][2] = 0;
+            t_map[1][0] = 3; t_map[1][1] = 0; t_map[1][2] = 1;
+            t_map[2][0] = 0; t_map[2][1] = 3; t_map[2][2] = 2;
+            t_map[3][0] = 2; t_map[3][1] = 1; t_map[3][2] = 3;
+        }
+        else
+        {
+            printf("Wrong number of triangles\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        v_coord[0][0] = 0; v_coord[0][1] = 0; v_coord[0][2] = 0;
+        v_coord[1][0] = 1; v_coord[1][1] = 0; v_coord[1][2] = 0;
+        v_coord[2][0] = 0; v_coord[2][1] = 1; v_coord[2][2] = 0;
+        v_coord[3][0] = 1; v_coord[3][1] = 1; v_coord[3][2] = 0;
+        v_coord[4][0] = 0; v_coord[4][1] = 0; v_coord[4][2] = 1;
+        v_coord[5][0] = 1; v_coord[5][1] = 0; v_coord[5][2] = 1;
+        v_coord[6][0] = 0; v_coord[6][1] = 1; v_coord[6][2] = 1;
+        v_coord[7][0] = 1; v_coord[7][1] = 1; v_coord[7][2] = 1;
+
+        if (num_fem == 6)
+        {
+            t_map[0][0] = 0; t_map[0][1] = 2; t_map[0][2] = 1; t_map[0][3] = 5;
+            t_map[1][0] = 1; t_map[1][1] = 2; t_map[1][2] = 3; t_map[1][3] = 5;
+            t_map[2][0] = 0; t_map[2][1] = 4; t_map[2][2] = 2; t_map[2][3] = 5;
+            t_map[3][0] = 5; t_map[3][1] = 3; t_map[3][2] = 7; t_map[3][3] = 2;
+            t_map[4][0] = 4; t_map[4][1] = 5; t_map[4][2] = 6; t_map[4][3] = 2;
+            t_map[5][0] = 5; t_map[5][1] = 7; t_map[5][2] = 6; t_map[5][3] = 2;
+        }
+        else if (num_fem == 8)
+        {
+            t_map[0][0] = 0; t_map[0][1] = 2; t_map[0][2] = 1; t_map[0][3] = 4;
+            t_map[1][0] = 1; t_map[1][1] = 0; t_map[1][2] = 3; t_map[1][3] = 5;
+            t_map[2][0] = 2; t_map[2][1] = 6; t_map[2][2] = 3; t_map[2][3] = 0;
+            t_map[3][0] = 3; t_map[3][1] = 2; t_map[3][2] = 7; t_map[3][3] = 1;
+            t_map[4][0] = 4; t_map[4][1] = 5; t_map[4][2] = 6; t_map[4][3] = 0;
+            t_map[5][0] = 5; t_map[5][1] = 7; t_map[5][2] = 4; t_map[5][3] = 1;
+            t_map[6][0] = 6; t_map[6][1] = 7; t_map[6][2] = 2; t_map[6][3] = 4;
+            t_map[7][0] = 7; t_map[7][1] = 3; t_map[7][2] = 6; t_map[7][3] = 5;
+        }
+        else
+        {
+            printf("Wrong number of tetrahedrals\n");
+            exit(EXIT_SUCCESS);
+        }
+    }
+}
+
+void x_map(double *&x, double *r, double **x_t, int n_dim, vector<function<double (double*)>> phi)
+{
+    for (int d = 0; d < n_dim; d++)
+    {
+        x[d] = 0.0;
+
+        for (int i = 0; i < n_dim + 1; i++)
+        {
+            x[d] += x_t[d][i] * phi[i](r);
+        }
+    }
+}
+
+void J_xr_map(double **&J_xr, double *r, double **x_t, int n_dim, vector<function<void (double*, double*)>> dphi)
+{
+    double deriv[n_dim];
+
+    for (int i = 0; i < n_dim; i++)
+    {
+        for (int j = 0; j < n_dim; j++)
+        {
+            J_xr[i][j] = 0.0;
+
+            for (int k = 0; k < n_dim + 1; k++)
+            {
+                dphi[k](deriv, r);
+
+                J_xr[i][j] += x_t[i][k] * deriv[j];
+            }
+        }
+    }
+}
+
+void parallel_ranking(int *&ranking, int *ids, int num_ids, int max_global)
+{
+    int rank, size;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    // Define how many elements are to sent to each processor
+    int ids_count[size] = { 0 };
+
+    for (int i = 0; i < num_ids; i++)
+    {
+        if (ids[i] < max_global)
+        {
+            ids_count[ids[i] / ((max_global + (size - 1)) / size)]++;
+        }
+    }
+
+    // Notify each processor of how many items they will receive
+    int receive_count[size];
+    int total_receive = 0;
+
+    MPI_Alltoall(ids_count, 1, MPI_INT, receive_count, 1, MPI_INT, MPI_COMM_WORLD);
+
+    for (int p = 0; p < size; p++)
+    {
+        total_receive += receive_count[p];
+    }
+
+    // Create matrix with values corresponding to each processor
+    int **ranking_values = new int*[size];
+    int values_count[size] = { 0 };
+    int **values_position = new int*[size];
+
+    for (int p = 0; p < size; p++)
+    {
+        ranking_values[p] = new int[ids_count[p]];
+        values_position[p] = new int[ids_count[p]];
+    }
+
+    for (int i = 0; i < num_ids; i++)
+    {
+        if (ids[i] < max_global)
+        {
+            int p = ids[i] / ((max_global + (size - 1)) / size);
+
+            ranking_values[p][values_count[p]] = ids[i];
+            values_position[p][values_count[p]] = i;
+            values_count[p]++;
+        }
+    }
+
+    // Map matrix of values of processors into 1D array
+    int total_values = 0;
+    int idx = 0;
+
+    for (int p = 0; p < size; p++)
+    {
+        total_values += ids_count[p];
+    }
+
+    int message_values[total_values];
+
+    for (int p = 0; p < size; p++)
+    {
+        for (int i = 0; i < ids_count[p]; i++)
+        {
+            message_values[idx] = ranking_values[p][i];
+            idx++;
+        }
+    }
+
+    // Comput offsets
+    int message_offsets[size] = { 0 };
+    int offset = 0;
+
+    for (int p = 0; p < size; p++)
+    {
+        message_offsets[p] = offset;
+        offset += ids_count[p];
+    }
+
+    int bucket_values[total_receive];
+    int receive_offsets[size] = { 0 };
+    offset = 0;
+
+    for (int p = 0; p < size; p++)
+    {
+        receive_offsets[p] = offset;
+        offset += receive_count[p];
+    }
+
+    // Send values to each processor to perform local rankings
+    MPI_Alltoallv(message_values, ids_count, message_offsets, MPI_INT, bucket_values, receive_count, receive_offsets, MPI_INT, MPI_COMM_WORLD);
+
+    // Perform local sorting
+    vector<VertexID> local_data(total_receive);
+
+    for (int i = 0; i < total_receive; i++)
+    {
+        local_data[i].key = i;
+        local_data[i].value = bucket_values[i];
+    }
+
+    // Sort with respect to value
+    sort(local_data.begin(), local_data.end(), [] (const VertexID &i, const VertexID &j) { return i.value < j.value; });
+
+    // Set local ranking
+    int ranking_value = 1;
+    local_data[0].ranking = 0;
+
+    for (int i = 1; i < total_receive; i++)
+    {
+        if (local_data[i].value == local_data[i - 1].value)
+        {
+            local_data[i].ranking = ranking_value - 1;
+        }
+        else
+        {
+            local_data[i].ranking = ranking_value;
+            ranking_value++;
+        }
+    }
+
+    // Share neighbor values to update ranking in each processor
+    int left_value;
+
+    if (rank < size - 1)
+    {
+        MPI_Send(&local_data[total_receive - 1].value, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (rank > 0)
+    {
+        MPI_Recv(&left_value, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, NULL);
+    }
+
+    // Perform scan to get rank offsets
+    int ranking_offset = 0;
+    int last_ranking = local_data[total_receive - 1].ranking;
+
+    if ((rank > 0) && (left_value != local_data[0].value))
+    {
+        last_ranking++;
+    }
+
+    MPI_Scan(&last_ranking, &ranking_offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    ranking_offset -= local_data[total_receive - 1].ranking;
+
+    if (rank > 0)
+    {
+        for (int i = 0; i < total_receive; i++)
+        {
+            local_data[i].ranking += ranking_offset;
+        }
+    }
+
+    // Sort with respect to key to get everything back in place
+    sort(local_data.begin(), local_data.end(), [] (const VertexID &i, const VertexID &j) { return i.key < j.key; });
+
+    // Send data to the corresponding processors
+    for (int i = 0; i < total_receive; i++)
+    {
+        bucket_values[i] = local_data[i].ranking;
+    }
+
+    MPI_Alltoallv(bucket_values, receive_count, receive_offsets, MPI_INT, message_values, ids_count, message_offsets, MPI_INT, MPI_COMM_WORLD);
+
+    // Reorganize data in original form
+    idx = 0;
+
+    for (int i = 0; i < num_ids; i++)
+    {
+        ranking[i] = -1;
+    }
+
+    for (int p = 0; p < size; p++)
+    {
+        for (int i = 0; i < ids_count[p]; i++)
+        {
+            ranking[values_position[p][i]] = message_values[idx];
+            idx++;
+        }
+    }
+
+    // Free memory
+    for (int p = 0; p < size; p++)
+    {
+        delete[] ranking_values[p];
+        delete[] values_position[p];
+    }
+
+    delete[] ranking_values;
+    delete[] values_position;
 }
 
 // Math Functions
@@ -702,15 +973,12 @@ double determinant(double** A, int n)
     }
 }
 
-void inverse(double**& inv_A, double** A, int n, double det_A = 0.0)
+void inverse(double**& inv_A, double** A, int n)
 {
     /*
      * Computes the inverse of a matrix
      */
-    if (det_A == 0.0)
-    {
-        det_A = determinant(A, n);
-    }
+    double det_A = determinant(A, n);
 
     if (n == 2)
     {
@@ -737,95 +1005,19 @@ void inverse(double**& inv_A, double** A, int n, double det_A = 0.0)
     }
 }
 
-void matrix_matrix_mul(double** C, double** A, double** B, int n, int m, int l, bool A_T, bool B_T)
-{
-    /*
-     * Computes C = A * B. A is of size (n, l), B is of size (l, m), and C is of size (n, m)
-     */
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            double sum = 0.0;
-
-            for (int k = 0; k < l; k++)
-            {
-                if (A_T)
-                {
-                    if (B_T)
-                    {
-                        sum += A[k][i] * B[j][k];
-                    }
-                    else
-                    {
-                        sum += A[k][i] * B[k][j];
-                    }
-                }
-                else
-                {
-                    if (B_T)
-                    {
-                        sum += A[i][k] * B[j][k];
-                    }
-                    else
-                    {
-                        sum += A[i][k] * B[k][j];
-                    }
-                }
-            }
-
-            C[i][j] = sum;
-        }
-    }
-}
-
-void matrix_scaling(double** A, double value, int n, int m)
-{
-    /*
-     * Scale a matrix by a constant
-     */
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            A[i][j] *= value;
-        }
-    }
-}
-
-void row_scaling(double** B, double** A, double* w, int n, int m)
-{
-    /*
-     * Scales the row of matrix A with values in w and stores it in B
-     */
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
-            B[i][j] = A[i][j] * w[i];
-        }
-    }
-}
-
-// Utility functions
+// Memory management
 template<typename DataType>
-DataType* allocate_single_pointer(int n)
+DataType* mem_alloc(int n)
 {
-    DataType* pointer = new DataType[n];
+    DataType *pointer = new DataType[n]; 
 
     return pointer;
 }
 
-template<typename PointerType>
-void free_single_pointer(PointerType& single_pointer)
-{
-    delete[] single_pointer;
-}
-
 template<typename DataType>
-DataType** allocate_double_pointer(int n, int m)
+DataType** mem_alloc(int n, int m)
 {
-    DataType** pointer = new DataType*[n];
+    DataType **pointer = new DataType*[n]; 
 
     for (int i = 0; i < n; i++)
     {
@@ -836,73 +1028,52 @@ DataType** allocate_double_pointer(int n, int m)
 }
 
 template<typename DataType>
-DataType** allocate_double_pointer(int n, int m, double value)
+DataType*** mem_alloc(int n, int m, int d)
 {
-    DataType** pointer = new DataType*[n];
+    DataType ***pointer = new DataType**[n]; 
 
     for (int i = 0; i < n; i++)
     {
-        pointer[i] = new DataType[m];
+        pointer[i] = new DataType*[m];
 
         for (int j = 0; j < m; j++)
         {
-            pointer[i][j] = value;
+            pointer[i][j] = new DataType[d];
         }
     }
 
     return pointer;
 }
 
-template<typename PointerType>
-void free_double_pointer(PointerType& double_pointer, int size)
+template<typename DataType>
+void mem_free(DataType *pointer, int n)
 {
-    for (int i = 0; i < size; i++)
-    {
-        delete[] double_pointer[i];
-    }
-
-    delete[] double_pointer;
+    delete[] pointer;
 }
 
-void print_matrix(double** A, int n, int m)
+template<typename DataType>
+void mem_free(DataType **pointer, int n, int m)
+{
+    for (int i = 0; i < n; i++)
+    {
+        delete[] pointer[i];
+    }
+
+    delete[] pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType ***pointer, int n, int m, int d)
 {
     for (int i = 0; i < n; i++)
     {
         for (int j = 0; j < m; j++)
         {
-            printf("%f ", A[i][j]);
+            delete[] pointer[i][j];
         }
 
-        printf("\n");
+        delete[] pointer[i];
     }
-}
 
-void print_vertices(double** V, int num_vert, int num_dim)
-{
-    for (int i = 0; i < num_vert; i++)
-    {
-        if (num_dim == 2)
-        {
-            printf("%d: (%f, %f)\n", i + 1, V[i][0], V[i][1]);
-        }
-        else
-        {
-            printf("%d: (%f, %f, %f)\n", i + 1, V[i][0], V[i][1], V[i][2]);
-        }
-    }
-}
-
-void print_elements(long int** E, int num_elem, int num_grid_points)
-{
-    for (int e = 0; e < num_elem; e++)
-    {
-        printf("[ ");
-
-        for (int i = 0; i < num_grid_points; i++)
-        {
-            printf("%ld ", E[e][i] + 1);
-        }
-
-        printf("]\n");
-    }
+    delete[] pointer;
 }

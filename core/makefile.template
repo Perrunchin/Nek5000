@@ -44,7 +44,7 @@ vprops.o makeq_aux.o \
 papi.o nek_in_situ.o \
 readat_new.o reader_re2.o \
 finiparser.o iniparser.o dictionary.o \
-breakpoint.o interface.o fem.o amg_preconditioner.o
+utilities.o interface.o fem.o amg_preconditioner.o
 ################################################################################
 # MXM 
 MXM =  
@@ -110,9 +110,9 @@ cFL3   = $(L3) $(CFLAGS) $(PPS_C)
 ################################################################################
 # Hypre
 ifeq ($(findstring -g, $(CFLAGS)), -g)
-	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/debug
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/parallel/debug
 else
-	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/serial/opt
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/parallel/opt
 endif
 
 ################################################################################
@@ -249,7 +249,7 @@ $(OBJDIR)/byte.o                 :$S/byte.c;              $(CC) -c $(cFL2) $< -o
 $(OBJDIR)/chelpers.o             :$S/chelpers.c;          $(CC) -c $(cFL2) $< -o $@
 
 # AMG Preconditioner #########################################################################
-$(OBJDIR)/breakpoint.o           :$(PDBM)/breakpoint.c;             $(CC) -c $(cFL2) $< -o $@
+$(OBJDIR)/utilities.o            :$(PDBM)/utilities.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
 $(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
 $(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
 $(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include $< -o $@
