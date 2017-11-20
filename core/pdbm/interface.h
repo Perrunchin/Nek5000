@@ -26,6 +26,9 @@ extern "C"
     void set_pressure_mask_(double*);
     void set_lambda_(double&);
     void set_mapping_(int&);
+
+    // TEMP:
+    void compute_ranking_();
 }
 
 // Memory management
