@@ -96,6 +96,10 @@ void set_mapping_(int &mapping_)
     mapping = mapping_;
 }
 
+void compute_ranking_()
+{
+}
+
 // Memory management
 template<typename DataType>
 DataType* mem_alloc(int n)

@@ -314,9 +314,6 @@ void fem_matrices()
     HYPRE_IJMatrixAssemble(A_f);
     HYPRE_IJMatrixAssemble(B_f);
 
-    HYPRE_IJMatrixPrint(A_f, "A_f");
-    HYPRE_IJMatrixPrint(B_f, "B_f");
-
     // Rank vertices after boundary conditions are removed
     int bc_ids[n_elem * n_x * n_y * n_z];
 
