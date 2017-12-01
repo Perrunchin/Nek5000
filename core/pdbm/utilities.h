@@ -12,6 +12,9 @@ extern "C"
     void breakpoint_();
 }
 
+long maximum_value(long*, int);
+long maximum_value(long**, int, int);
+
 // Memory management
 template<typename DataType>
 DataType* mem_alloc(int);

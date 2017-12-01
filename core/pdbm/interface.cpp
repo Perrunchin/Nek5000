@@ -17,10 +17,8 @@ using namespace std;
 // Global variables definition
 int n_x, n_y, n_z, n_elem, n_dim;
 double ***mesh;
-long int **glo_num;
+long **glo_num;
 double **press_mask;
-double lambda;
-int mapping;
 
 // Set functions
 void enable_mpi_output_()
@@ -63,9 +61,9 @@ void set_mesh_data_(double *x_m_, double *y_m_, double *z_m_)
     }
 }
 
-void set_global_numbering_(long int *glo_num_)
+void set_global_numbering_(long *glo_num_)
 {
-    glo_num = mem_alloc<long int>(n_elem, n_x * n_y * n_z);
+    glo_num = mem_alloc<long>(n_elem, n_x * n_y * n_z);
 
     for (int e = 0; e < n_elem; e++)
     {
@@ -84,20 +82,6 @@ void set_pressure_mask_(double* press_mask_)
     {
         press_mask[e] = press_mask_ + e * (n_x * n_y * n_z);
     }
-}
-
-void set_lambda_(double &lambda_)
-{
-    lambda = lambda_;
-}
-
-void set_mapping_(int &mapping_)
-{
-    mapping = mapping_;
-}
-
-void compute_ranking_()
-{
 }
 
 // Memory management

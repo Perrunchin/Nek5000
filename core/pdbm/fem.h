@@ -17,7 +17,9 @@ using namespace std;
 #define FEM_H
 
 // Global variables declaration
-extern int *ranking;
+extern long *ranking;
+extern long **dof_map;
+extern int num_loc_dofs;
 extern HYPRE_IJMatrix A_bc;
 extern HYPRE_ParCSRMatrix A_fem;
 extern HYPRE_IJMatrix B_bc;
@@ -38,6 +40,10 @@ extern "C"
 {
     void assemble_fem_matrices_();
     void set_sem_inverse_mass_matrix_(double*);
+
+    // Fortran functions
+    void set_amg_gs_handle_(long*, int&);
+    void compress_data_(long*, int&);
 }
 
 // FEM Assembly
@@ -46,7 +52,7 @@ void quadrature_rule(double**&, double*&, int, int);
 void mesh_connectivity(int**&, int**&, int, int);
 void x_map(double*&, double*, double**, int, vector<function<double (double*)>>);
 void J_xr_map(double**&, double*, double**, int, vector<function<void (double*, double*)>>);
-void parallel_ranking(int*&, int*, int, int);
+void parallel_ranking(long*&, long*, int, long);
 
 // Math functions
 double determinant(double**, int);
