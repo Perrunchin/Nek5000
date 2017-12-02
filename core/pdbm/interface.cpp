@@ -7,6 +7,8 @@
 
 // C/C++ Headers
 #include <iostream>
+#include <string>
+#include <fstream>
 #include <limits>
 #include <algorithm>
 #include "mpi.h"

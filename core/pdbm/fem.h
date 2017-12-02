@@ -44,6 +44,7 @@ extern "C"
     // Fortran functions
     void set_amg_gs_handle_(long*, int&);
     void compress_data_(long*, int&);
+    void distribute_data_(double*, int&);
 }
 
 // FEM Assembly
@@ -53,6 +54,7 @@ void mesh_connectivity(int**&, int**&, int, int);
 void x_map(double*&, double*, double**, int, vector<function<double (double*)>>);
 void J_xr_map(double**&, double*, double**, int, vector<function<void (double*, double*)>>);
 void parallel_ranking(long*&, long*, int, long);
+void serial_ranking(long*, long*, int);
 
 // Math functions
 double determinant(double**, int);

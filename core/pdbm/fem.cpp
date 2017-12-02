@@ -313,74 +313,118 @@ void fem_matrices()
     {
         for (int i = 0; i < n_x * n_y * n_z; i++)
         {
-            if (press_mask[e][i] > 0)
+            if (press_mask[e][i] > 0.0)
             {
                 num_loc_dofs++;
             }
         }
     }
 
-    dof_map = mem_alloc<long>(2, num_loc_dofs);
+    dof_map = mem_alloc<long>(3, num_loc_dofs);
     int idx = 0;
 
     for (int e = 0; e < n_elem; e++)
     {
         for (int i = 0; i < n_x * n_y * n_z; i++)
         {
-            if (press_mask[e][i] > 0)
+            if (press_mask[e][i] > 0.0)
             {
-                dof_map[0][idx] = i + e * (n_x * n_y * n_z);
-                dof_map[1][idx] = glo_num[e][i];
+                dof_map[0][idx] = i;
+                dof_map[1][idx] = e;
+                dof_map[2][idx] = glo_num[e][i];
                 idx++;
             }
         }
     }
 
-    set_amg_gs_handle_(dof_map[1], num_loc_dofs);
+    set_amg_gs_handle_(dof_map[2], num_loc_dofs);
 
     long compression[num_loc_dofs];
-    long offset = num_loc_dofs;
+    long offset = 0;
+
+    if (rank < size - 1)
+    {
+        MPI_Send(&num_loc_dofs, 1, MPI_LONG, rank + 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (rank > 0)
+    {
+        MPI_Recv(&offset, 1, MPI_LONG, rank - 1, 0, MPI_COMM_WORLD, NULL);
+    }
 
     MPI_Scan(MPI_IN_PLACE, &offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
-        compression[i] = offset - num_loc_dofs + i;
+        compression[i] = offset + i;
     }
 
     compress_data_(compression, num_loc_dofs);
 
     ranking = mem_alloc<long>(num_loc_dofs);
 
-    parallel_ranking(ranking, compression, num_loc_dofs, num_vert);
+//    long max_global = max(num_vert, (long)(num_loc_dofs));
+//
+//    parallel_ranking(ranking, compression, num_loc_dofs, max_global);
+
+    // Gather data in one proc
+    // TODO: Use parallel ranking
+    int total_receive[size];
+    int displs[size] = { 0 };
+
+    MPI_Gather(&num_loc_dofs, 1, MPI_INT, total_receive, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    int total_count = total_receive[0];
+
+    for (int r = 1; r < size; r++)
+    {
+        displs[r] = displs[r - 1] + total_receive[r - 1];
+        total_count += total_receive[r];
+    }
+
+    long *array = NULL;
+    long *new_ranking = NULL;
+
+    if (rank == 0)
+    {
+        array = mem_alloc<long>(total_count);
+    }
+
+    MPI_Gatherv(compression, num_loc_dofs, MPI_LONG, array, total_receive, displs, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    if (rank == 0)
+    {
+        new_ranking = mem_alloc<long>(total_count);
+        serial_ranking(new_ranking, array, total_count);
+    }
+
+    MPI_Scatterv(new_ranking, total_receive, displs, MPI_LONG, ranking, num_loc_dofs, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    mem_free<long>(array, total_count);
+    // END TODO
 
     // Number of unique vertices after boundary conditions are applied
     long num_vert_bc = maximum_value(ranking, num_loc_dofs) + 1;
     long scan_offset;
 
-    offset = 0;
+    long idx_start_bc = 0;
+    long idx_end_bc = 0;
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
-        offset = max(offset, ranking[i]);
+        idx_end_bc = max(idx_end_bc, ranking[i]);
     }
 
-    MPI_Scan(&offset, &scan_offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
-
-    long idx_start_bc = scan_offset - offset;
-    long idx_end_bc = 0;
+    if (rank < size - 1)
+    {
+        MPI_Send(&idx_end_bc, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+    }
 
     if (rank > 0)
     {
-        idx_start_bc++;
-    }
+        MPI_Recv(&idx_start_bc, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, NULL);
 
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        if (ranking[i] > scan_offset - offset)
-        {
-            idx_end_bc = max(idx_end_bc, ranking[i]);
-        }
+        idx_start_bc += 1;
     }
 
     // Assemble FE matrices with boundaries removed
@@ -402,12 +446,12 @@ void fem_matrices()
 
     for (int i = 0; i < num_vert; i++)
     {
-        glo_map[i] = 0;
+        glo_map[i] = -1;
     }
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
-        glo_map[dof_map[1][i]] = ranking[i];
+        glo_map[dof_map[2][i]] = ranking[i];
     }
 
     MPI_Allreduce(MPI_IN_PLACE, glo_map, num_vert, MPI_LONG, MPI_MAX, MPI_COMM_WORLD);
@@ -416,7 +460,7 @@ void fem_matrices()
 
     for (int i = 0; i < num_vert; i++)
     {
-        glo_press_mask[i] = 0.0;
+        glo_press_mask[i] = -1.0;
     }
 
     for (int e = 0; e < n_elem; e++)
@@ -484,7 +528,6 @@ void fem_matrices()
             HYPRE_ParCSRMatrixRestoreRow(B_f_csr, i, &n_cols, &cols, &values);
         }
     }
-
 
     HYPRE_IJMatrixAssemble(A_bc);
     HYPRE_IJMatrixGetObject(A_bc, (void**) &A_fem);
@@ -580,6 +623,8 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
+//    asm("int $3");
+
     HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Binv_sem_bc);
     HYPRE_IJVectorSetObjectType(Binv_sem_bc, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(Binv_sem_bc);
@@ -595,8 +640,13 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
         double one = 1.0;
         int row = (int)(ranking[i]);
 
-        HYPRE_IJVectorAddToValues(Binv_sem_bc, 1, &row, &inv_B[dof_map[0][i]]);
-        HYPRE_IJVectorAddToValues(total_count, 1, &row, &one);
+        if (row >= 0)
+        {
+            int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+
+            HYPRE_IJVectorAddToValues(Binv_sem_bc, 1, &row, &inv_B[idx]);
+            HYPRE_IJVectorAddToValues(total_count, 1, &row, &one);
+        }
     }
 
     HYPRE_IJVectorAssemble(Binv_sem_bc);
@@ -1033,6 +1083,47 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
 
     delete[] ranking_values;
     delete[] values_position;
+}
+
+void serial_ranking(long *ranking, long *array, int num_elems)
+{
+    vector<pair<int, long>> array_sorting(num_elems);
+
+    for (int i = 0; i < num_elems; i++)
+    {
+        array_sorting[i].first = i;
+        array_sorting[i].second = array[i];
+    }
+
+    sort(array_sorting.begin(), array_sorting.end(), [] (const pair<int, long> &i, const pair<int, long> &j) { return i.second < j.second; });
+
+    long ranking_value = 1;
+    ranking[0] = 0;
+
+    for (int i = 1; i < num_elems; i++)
+    {
+        if (array_sorting[i].second == array_sorting[i - 1].second)
+        {
+            ranking[i] = ranking_value - 1;
+        }
+        else
+        {
+            ranking[i] = ranking_value;
+            ranking_value++;
+        }
+    }
+
+    for (int i = 0; i < num_elems; i++)
+    {
+        array_sorting[i].second = ranking[i];
+    }
+
+    sort(array_sorting.begin(), array_sorting.end(), [] (const pair<int, long> &i, const pair<int, long> &j) { return i.first < j.first; });
+
+    for (int i = 0; i < num_elems; i++)
+    {
+        ranking[i] = array_sorting[i].second;
+    }
 }
 
 // Math Functions
