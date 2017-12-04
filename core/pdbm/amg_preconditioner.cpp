@@ -71,39 +71,51 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
             }
         }
     }
-//    else
-//    {
-//        if (mass_diagonal)
-//        {
-//            for (int i = row_start; i <= row_end; i++)
-//            {
-//                double Bd_fem_value;
-//                double Binv_sem_value;
-//
-//                HYPRE_IJVectorGetValues(Bd_bc, 1, &i, &Bd_fem_value);
-//                HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &i, &Binv_sem_value);
-//
-//                double value = Bd_fem_value * Binv_sem_value * f_array[i];
-//
-//                HYPRE_IJVectorSetValues(f_bc, 1, &i, &value);
-//            }
-//        }
-//        else
-//        {
-//            for (int i = row_start; i <= row_end; i++)
-//            {
-//                double Binv_sem_value;
-//
-//                HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &i, &Binv_sem_value);
-//
-//                double value = Binv_sem_value * f_array[i];
-//
-//                HYPRE_IJVectorSetValues(Bf_bc, 1, &i, &value);
-//            }
-//
-//            HYPRE_ParCSRMatrixMatvec(1.0, B_fem, Bf_fem, 0.0, f_fem);
-//        }
-//    }
+    else
+    {
+        if (mass_diagonal)
+        {
+            for (int i = 0; i < num_loc_dofs; i++)
+            {
+                int row = ranking[i];
+
+                if ((row_start <= row) and (row <= row_end))
+                {
+                    double Bd_fem_value;
+                    double Binv_sem_value;
+                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+
+                    HYPRE_IJVectorGetValues(Bd_bc, 1, &row, &Bd_fem_value);
+                    HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &row, &Binv_sem_value);
+
+                    double value = Bd_fem_value * Binv_sem_value * right_hand_side_vector[idx];
+
+                    HYPRE_IJVectorSetValues(f_bc, 1, &row, &value);
+                }
+            }
+        }
+        else
+        {
+            for (int i = 0; i < num_loc_dofs; i++)
+            {
+                int row = ranking[i];
+
+                if ((row_start <= row) and (row <= row_end))
+                {
+                    double Binv_sem_value;
+                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+
+                    HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &row, &Binv_sem_value);
+
+                    double value = Binv_sem_value * right_hand_side_vector[idx];
+
+                    HYPRE_IJVectorSetValues(Bf_bc, 1, &row, &value);
+                }
+            }
+
+            HYPRE_ParCSRMatrixMatvec(1.0, B_fem, Bf_fem, 0.0, f_fem);
+        }
+    }
 
     HYPRE_IJVectorAssemble(f_bc);
 
