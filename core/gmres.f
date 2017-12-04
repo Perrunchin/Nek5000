@@ -334,6 +334,7 @@ c     data    iflag,if_hyb  /.false. , .true. /
       save    norm_fac
 
       real*8 etime1,dnekclock
+      real*8 prec_time
 
       ! AMG Preconditioner
       logical use_amg
@@ -429,6 +430,7 @@ c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
                call add2         (z_gmres(1,j),wk,n) !  j        
             endif
 
+            write(*, *) "Prec Time: ", dnekclock() - etime2
 
             call ortho        (z_gmres(1,j)) ! Orthogonalize wrt null space, if present
             etime_p = etime_p + dnekclock()-etime2
