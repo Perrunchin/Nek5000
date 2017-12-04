@@ -573,30 +573,30 @@ void fem_matrices()
     HYPRE_IJVectorAssemble(Bd_bc);
     HYPRE_IJVectorGetObject(Bd_bc, (void**) &Bd_fem);
 
-    // OUTPUT
-    HYPRE_IJMatrixPrint(A_f, "A_f");
-    HYPRE_IJMatrixPrint(A_bc, "A_bc");
-    HYPRE_IJMatrixPrint(B_f, "B_f");
-    HYPRE_IJMatrixPrint(B_bc, "B_bc");
-
-    if (rank == 0)
-    {
-        ofstream file;
-        file.open("mapping.dat");
-
-        for (int i = 0; i < num_vert; i++)
-        {
-            if (glo_press_mask[i] > 0.0)
-            {
-                file << i << " " << glo_map[i] << endl;
-            }
-        }
-
-        file.close();
-    }
-
-    HYPRE_IJVectorPrint(Bd_bc, "Bd_bc");
-    // END OUTPUT
+//    // OUTPUT
+//    HYPRE_IJMatrixPrint(A_f, "A_f");
+//    HYPRE_IJMatrixPrint(A_bc, "A_bc");
+//    HYPRE_IJMatrixPrint(B_f, "B_f");
+//    HYPRE_IJMatrixPrint(B_bc, "B_bc");
+//
+//    if (rank == 0)
+//    {
+//        ofstream file;
+//        file.open("mapping.dat");
+//
+//        for (int i = 0; i < num_vert; i++)
+//        {
+//            if (glo_press_mask[i] > 0.0)
+//            {
+//                file << i << " " << glo_map[i] << endl;
+//            }
+//        }
+//
+//        file.close();
+//    }
+//
+//    HYPRE_IJVectorPrint(Bd_bc, "Bd_bc");
+//    // END OUTPUT
 
     // Free memory
     mem_free<double>(q_r, n_quad, n_dim);
@@ -622,8 +622,6 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
     int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
-
-//    asm("int $3");
 
     HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Binv_sem_bc);
     HYPRE_IJVectorSetObjectType(Binv_sem_bc, HYPRE_PARCSR);
@@ -673,45 +671,45 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
     HYPRE_IJVectorAssemble(Binv_sem_bc);
     HYPRE_IJVectorDestroy(total_count);
 
-    // OUTPUT
-    long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
-    double Binv[num_vert];
-
-    for (int i = 0; i < num_vert; i++)
-    {
-        Binv[i] = 0.0;
-    }
-
-    for (int e = 0; e < n_elem; e++)
-    {
-        for (int i = 0; i < n_x * n_y * n_z; i++)
-        {
-            int idx = i + e * (n_x * n_y * n_z);
-
-            Binv[glo_num[e][i]] = inv_B[idx];
-        }
-    }
-
-    MPI_Allreduce(MPI_IN_PLACE, &Binv, num_vert, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-    if (rank == 0)
-    {
-        ofstream file;
-        file.open("Binv_sem.dat");
-
-        for (int i = 0; i < num_vert; i++)
-        {
-            file << fixed << setprecision(16) << Binv[i] << endl;
-        }
-
-        file.close();
-    }
-
-    HYPRE_IJVectorPrint(Binv_sem_bc, "Binv_sem_bc");
-    // END OUTPUT
+//    // OUTPUT
+//    long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
+//    double Binv[num_vert];
+//
+//    for (int i = 0; i < num_vert; i++)
+//    {
+//        Binv[i] = 0.0;
+//    }
+//
+//    for (int e = 0; e < n_elem; e++)
+//    {
+//        for (int i = 0; i < n_x * n_y * n_z; i++)
+//        {
+//            int idx = i + e * (n_x * n_y * n_z);
+//
+//            Binv[glo_num[e][i]] = inv_B[idx];
+//        }
+//    }
+//
+//    MPI_Allreduce(MPI_IN_PLACE, &Binv, num_vert, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+//
+//    int rank;
+//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+//
+//    if (rank == 0)
+//    {
+//        ofstream file;
+//        file.open("Binv_sem.dat");
+//
+//        for (int i = 0; i < num_vert; i++)
+//        {
+//            file << fixed << setprecision(16) << Binv[i] << endl;
+//        }
+//
+//        file.close();
+//    }
+//
+//    HYPRE_IJVectorPrint(Binv_sem_bc, "Binv_sem_bc");
+//    // END OUTPUT
 }
 
 void quadrature_rule(double **&q_r, double *&q_w, int n_quad, int n_dim)
