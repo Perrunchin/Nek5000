@@ -101,7 +101,7 @@ c      COMMON /SCRCG/ DUMM10(LX1,LY1,LZ1,LELT,1)
             ifemati = .true.
             kwave2  = 0.0
             if (ifsplit) ifemati = .false.
-            call gfdm_init(nx2,ny2,nz2,ifemati,kwave2)
+            call gfdm_init(lx2,ly2,lz2,ifemati,kwave2)
          elseif (solver_type.eq.'25D') then
             call g25d_init
          endif
@@ -118,8 +118,8 @@ c      COMMON /SCRCG/ DUMM10(LX1,LY1,LZ1,LELT,1)
         if (nio.eq.0) write(6,*)'Initialized DG machinery'
 #endif
 
-      call setics      !     Set initial conditions 
-      call setprop     !     Compute field properties
+      call setics   !     Set initial conditions 
+      call setprop  !     Compute field properties
 
       if (instep.ne.0) then !USRCHK
         if(nio.eq.0) write(6,*) 'call userchk'
@@ -147,13 +147,13 @@ c      COMMON /SCRCG/ DUMM10(LX1,LY1,LZ1,LELT,1)
       ntdump=0
       if (timeio.ne.0.0) ntdump = int( time/timeio )
 
-      etims0 = dnekclock_sync()
+      tinit = dnekclock_sync() - etimes
       if (nio.eq.0) then
         write (6,*) ' '
         if (time.ne.0.0) write (6,'(a,e14.7)') ' Initial time:',time
         write (6,'(a,g13.5,a)') 
      &              ' Initialization successfully completed ',
-     &              etims0-etimes, ' sec'
+     &              tinit, ' sec'
       endif
 
       ifsync = ifsync_ ! restore initial value
@@ -167,9 +167,6 @@ c-----------------------------------------------------------------------
       include 'TSTEP'
       include 'INPUT'
       include 'CTIMER'
-
-      real*4 papi_mflops
-      integer*8 papi_flops
 
       call nekgsync()
 
@@ -188,7 +185,10 @@ c-----------------------------------------------------------------------
       itime = 1
 #endif
       call nek_comm_settings(isyc,itime)
+
+      ! start measurements
       call nek_comm_startstat()
+      dtmp = dnekgflops()
 
       istep  = 0
       msteps = 1
@@ -235,7 +235,7 @@ c-----------------------------------------------------------------------
 
       common /cgeom/ igeom
 
-      ntot = nx1*ny1*nz1*nelv
+      ntot = lx1*ly1*lz1*nelv
 
       call nekgsync
 
@@ -257,6 +257,8 @@ c-----------------------------------------------------------------------
 
          do igeom=1,ngeom
 
+         if (igeom.gt.2) call userchk_set_xfer
+
          ! call here before we overwrite wx 
          if (ifheat .and. ifcvode) call heat_cvode (igeom)   
 
@@ -275,7 +277,7 @@ c-----------------------------------------------------------------------
 
          if (ifflow)          call fluid    (igeom)
          if (ifmvbd)          call meshv    (igeom)
-         if (igeom.eq.ngeom.and.param(103).gt.0)
+         if (igeom.eq.ngeom.and.filterType.eq.1)
      $                        call q_filter(param(103))
 
          enddo
@@ -309,8 +311,7 @@ c-----------------------------------------------------------------------
                if (ifflow)             call fluid         (igeom)
                if (ifmvbd)             call meshv         (igeom)
             endif
-
-            if (igeom.eq.ngeom.and.param(103).gt.0)
+            if (igeom.eq.ngeom.and.filterType.eq.1)
      $         call q_filter(param(103))
          enddo
       endif
@@ -327,7 +328,7 @@ c-----------------------------------------------------------------------
       include 'OPCTR'
 
       if(instep.ne.0)  call runstat
-      if(xxth(1).gt.0) call crs_stats(xxth(1))
+      if(xxth(1).gt.0) call fgslib_crs_stats(xxth(1))
 
    
       call in_situ_end()

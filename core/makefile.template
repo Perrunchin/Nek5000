@@ -34,7 +34,7 @@ plan5.o \
 plan4.o bdry.o coef.o conduct.o connect1.o connect2.o \
 dssum.o edgec.o eigsolv.o gauss.o genxyz.o navier1.o makeq.o \
 navier0.o navier2.o navier3.o navier4.o prepost.o speclib.o \
-map2.o turb.o mvmesh.o ic.o gfldr.o ssolv.o planx.o math.o mxm_wrapper.o \
+map2.o mvmesh.o ic.o gfldr.o ssolv.o planx.o math.o mxm_wrapper.o \
 hmholtz.o gfdm_par.o  gfdm_op.o gfdm_solve.o subs1.o subs2.o \
 genbox.o gmres.o hsmg.o convect.o induct.o perturb.o \
 navier5.o navier6.o navier7.o navier8.o fast3d.o fasts.o calcz.o \
@@ -42,9 +42,10 @@ byte.o chelpers.o byte_mpi.o postpro.o intp_usr.o \
 cvode_driver.o nek_comm.o \
 vprops.o makeq_aux.o \
 papi.o nek_in_situ.o \
-readat_new.o reader_re2.o \
+reader_rea.o reader_par.o reader_re2.o \
 finiparser.o iniparser.o dictionary.o \
-breakpoint.o interface.o fem.o amg_preconditioner.o
+hpf.o \
+utilities.o interface.o fem.o amg_preconditioner.o
 ################################################################################
 # MXM 
 MXM =  
@@ -71,7 +72,7 @@ else
   CMTCORE := drive1_cmt.o drive2_cmt.o driver3_cmt.o \
    face.o ausm.o  MixtPerf.o intpdiff.o diffusive_cmt.o eqnsolver_cmt.o surface_fluxes.o \
    bc.o inflow_bc.o outflow_bc.o wall_bc.o step.o \
-   filters_cmt.o diagnostics.o
+   filters_cmt.o diagnostics.o artvisc.o
 endif
 # VISIT ########################################################################
 ifneq ($(VISIT),0)
@@ -111,10 +112,12 @@ cFL3   = $(L3) $(CFLAGS) $(PPS_C)
 # Raptor
 ifeq ($(findstring -g, $(CFLAGS)), -g)
 	RAPTOR_INC_DIR = /home/perrunchin/Programs/Raptor/raptor
-	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/serial/dbg/lib
+	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/debug/lib
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/parallel/debug
 else
 	RAPTOR_INC_DIR = /home/perrunchin/Programs/Raptor/raptor
-	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/serial/opt/lib
+	RAPTOR_LIB_DIR = /home/perrunchin/Programs/Raptor/build/opt/lib
+	HYPRE_DIR = /home/perrunchin/Programs/Hypre/src/build/parallel/opt
 endif
 
 ################################################################################
@@ -125,7 +128,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(RAPTOR_LIB_DIR) -lmpi_cxx -lraptor -lblas -llapack
+	$(FC) $(FL2) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(HYPRE_DIR)/lib -lmpi_cxx -lHYPRE -lraptor -lblas -llapack
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
@@ -161,14 +164,13 @@ $(OBJDIR)/drive2.o	:$S/drive2.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/prepost.o	:$S/prepost.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/postpro.o	:$S/postpro.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/intp_usr.o	:$S/intp_usr.f;			$(FC) -c $(FL2) $< -o $@
-$(OBJDIR)/gfldr.o	:$S/gfldr.f;			$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/gfldr.o	:$S/gfldr.f $S/GFLDR;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/connect1.o	:$S/connect1.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/connect2.o	:$S/connect2.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/edgec.o	:$S/edgec.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/genxyz.o	:$S/genxyz.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/subs1.o	:$S/subs1.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/subs2.o	:$S/subs2.f;			$(FC) -c $(FL2) $< -o $@
-$(OBJDIR)/turb.o	:$S/turb.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/map2.o	:$S/map2.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/mvmesh.o	:$S/mvmesh.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/induct.o	:$S/induct.f;	      		$(FC) -c $(FL2) $< -o $@
@@ -204,7 +206,7 @@ $(OBJDIR)/coef.o	:$S/coef.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/plan4.o	:$S/plan4.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/plan5.o	:$S/plan5.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/vprops.o	:$S/vprops.f;	   		$(FC) -c $(FL2) $< -o $@
-$(OBJDIR)/cvode_driver.o :$S/cvode_driver.f;		$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/cvode_driver.o :$S/cvode_driver.f $S/CVODE;	$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/makeq.o      	:$S/makeq.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/makeq_aux.o  	:$S/makeq_aux.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/hmholtz.o	:$S/hmholtz.f;			$(FC) -c $(FL2) $< -o $@
@@ -217,8 +219,10 @@ $(OBJDIR)/math.o	:$S/math.f;			$(FC) -c $(FL3) $< -o $@
 $(OBJDIR)/multimesh.o	:$S/multimesh.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/singlmesh.o	:$S/singlmesh.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/lb_setqvol.o	:$S/lb_setqvol.f;		$(FC) -c $(FL2) $< -o $@
-$(OBJDIR)/readat_new.o	:$S/readat_new.f $S/PARDICT;	$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/reader_rea.o	:$S/reader_rea.f;	 	$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/reader_par.o	:$S/reader_par.f $S/PARDICT;	$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/reader_re2.o	:$S/reader_re2.f;		$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/hpf.o	       	:$S/hpf.f;         		$(F77) -c $(FL2) $< -o $@
 
 # CMT CORE     ##################################################################
 $(OBJDIR)/step.o	:$(SCMT)/step.f;        	$(FC) -c $(FL2) $< -o $@
@@ -228,6 +232,7 @@ $(OBJDIR)/driver3_cmt.o	:$(SCMT)/driver3_cmt.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/gradient_solver.o	:$(SCMT)/gradient_solver.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/eqnsolver_cmt.o	:$(SCMT)/eqnsolver_cmt.f;		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/ausm.o	:$(SCMT)/ausm.f;   		$(FC) -c $(FL2) $< -o $@
+$(OBJDIR)/artvisc.o	:$(SCMT)/artvisc.f;   		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/face.o	:$(SCMT)/face.f;  		$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/bc.o		:$(SCMT)/bc.f;			$(FC) -c $(FL2) $< -o $@
 $(OBJDIR)/surface_fluxes.o	:$(SCMT)/surface_fluxes.f;		$(FC) -c $(FL2) $< -o $@
@@ -251,10 +256,10 @@ $(OBJDIR)/byte.o                 :$S/byte.c;              $(CC) -c $(cFL2) $< -o
 $(OBJDIR)/chelpers.o             :$S/chelpers.c;          $(CC) -c $(cFL2) $< -o $@
 
 # AMG Preconditioner #########################################################################
-$(OBJDIR)/breakpoint.o           :$(PDBM)/breakpoint.c;             $(CC) -c $(cFL2) $< -o $@
-$(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
-$(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
-$(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/utilities.o            :$(PDBM)/utilities.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/interface.o            :$(PDBM)/interface.cpp;            $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/amg_preconditioner.o   :$(PDBM)/amg_preconditioner.cpp;   $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include -I$(RAPTOR_INC_DIR) $< -o $@
+$(OBJDIR)/fem.o                  :$(PDBM)/fem.cpp;                  $(CXX) -c $(cFL2) -std=c++11 -I$(HYPRE_DIR)/include -I$(RAPTOR_INC_DIR) $< -o $@
 
 # 3rd party #######################################################################################
 $(OBJDIR)/dsygv.o     	:$S/3rd_party/dsygv.f;  	$(FC) -c $(L0) $(PPS_F) $< -o $@

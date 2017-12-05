@@ -21,16 +21,17 @@ c-----------------------------------------------------------------------
       if (ifheat) nfldt = 2+npscal
       if (ifmhd ) nfldt = 2+npscal+1
 
-c
-c     If p32 = 0.1, there will be no bcs read in
-c
-      if (param(32).gt.0) nfldt = ibc + param(32)-1
+      ! first field to read
+      if (param(33).gt.0) ibc = int(param(33))
+
+      ! number of fields to read
+      if (param(32).gt.0) nfldt = ibc + int(param(32)) - 1
 
       lcbc=18*lelt*(ldimt1 + 1)
       call blank(cbc,lcbc)
 
 #ifndef NOMPIIO
-      call crystal_setup(cr_re2,nekcomm,np)
+      call fgslib_crystal_setup(cr_re2,nekcomm,np)
 
       call byte_open_mpi(re2fle,fh_re2,.TRUE.,ierr)
       call err_chk(ierr,' Cannot open .re2 file!$')
@@ -41,7 +42,7 @@ c
          call readp_re2_bc(cbc(1,1,ifield),bc(1,1,1,ifield),ifbswap)
       enddo
 
-      call crystal_free  (cr_re2)
+      call fgslib_crystal_free(cr_re2)
       call byte_close_mpi(fh_re2,ierr)
 #else
       call byte_open(re2fle,ierr)
@@ -113,7 +114,8 @@ c-----------------------------------------------------------------------
       ! crystal route nr real items of size lrs to rank vi(key,1:nr)
       n   = nr
       key = 1 
-      call crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,key)
+      call fgslib_crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,
+     &                                   key)
 
       ! unpack buffer
       if(n.gt.nrmax) goto 100
@@ -213,7 +215,8 @@ c-----------------------------------------------------------------------
       ! crystal route nr real items of size lrs to rank vi(key,1:nr)
       n    = nr
       key  = 1
-      call crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,key)
+      call fgslib_crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,
+     &                                   key)
 
       ! unpack buffer
       if(n.gt.nrmax) goto 100
@@ -319,7 +322,8 @@ c-----------------------------------------------------------------------
       ! crystal route nr real items of size lrs to rank vi(key,1:nr)
       n    = nr
       key  = 1
-      call crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,key)
+      call fgslib_crystal_tuple_transfer(cr_re2,n,nrmax,vi,li,vl,0,vr,0,
+     &                                   key)
 
       ! unpack buffer
       if(n.gt.nrmax) goto 100
@@ -344,7 +348,7 @@ c-----------------------------------------------------------------------
 c      integer e,eg,buf(0:49)
       integer e,eg,buf(0:49)
 
-      nwds = (1 + ndim*(2**ndim))*(wdsizi/4) ! group + 2x4 for 2d, 3x8 for 3d
+      nwds = (1 + ldim*(2**ldim))*(wdsizi/4) ! group + 2x4 for 2d, 3x8 for 3d
 
       if     (ifbswap.and.ierr.eq.0.and.wdsizi.eq.8) then
           call byte_reverse8(buf,nwds,ierr)
@@ -355,7 +359,7 @@ c      integer e,eg,buf(0:49)
 
       if(wdsizi.eq.8) then
          call copyi4(igroup(e),buf(0),1) !0-1
-         if (ndim.eq.3) then
+         if (ldim.eq.3) then
             call copy  (xc(1,e),buf( 2),8) !2 --17
             call copy  (yc(1,e),buf(18),8) !18--33
             call copy  (zc(1,e),buf(34),8) !34--49
@@ -460,7 +464,7 @@ c-----------------------------------------------------------------------
 
       if (nio.eq.0) write(6,*)    '  reading mesh '
 
-      nwds = (1 + ndim*(2**ndim))*(wdsizi/4) ! group + 2x4 for 2d, 3x8 for 3d
+      nwds = (1 + ldim*(2**ldim))*(wdsizi/4) ! group + 2x4 for 2d, 3x8 for 3d
       len  = 4*nwds                          ! 4 bytes / wd
 
       if (nwds.gt.55.or.isize.gt.4) then
@@ -682,7 +686,7 @@ c        write(6,*) mid,' bclose ',eg,nbc_max
 
       else               ! wait for data from node 0
 
-         nbc_max = 2*ndim*nelt
+         nbc_max = 2*ldim*nelt
          do k=1,nbc_max+1  ! Need one extra !
 
 c           write(6,*) nid,' recvbc1',k
@@ -788,7 +792,7 @@ c-----------------------------------------------------------------------
          call byte_read(hdr,20,ierr)
          if(ierr.ne.0) goto 100
 
-         read (hdr,1) version,nelgt,ndim,nelgv
+         read (hdr,1) version,nelgt,ldimr,nelgv
     1    format(a5,i9,i3,i9)
  
          wdsizi = 4
@@ -811,8 +815,8 @@ c-----------------------------------------------------------------------
       call bcast(wdsizi, ISIZE)
       call bcast(ifbswap,LSIZE)
       call bcast(nelgv  ,ISIZE)
-      call bcast(ndim   ,ISIZE)
       call bcast(nelgt  ,ISIZE)
+      call bcast(ldimr  ,ISIZE)
       call bcast(param(32),WDSIZE)
 
       if(wdsize.eq.4.and.wdsizi.eq.8) 
