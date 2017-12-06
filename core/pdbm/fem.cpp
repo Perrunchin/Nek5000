@@ -150,6 +150,39 @@ void assemble_fem_matrices_()
 
         Bd_fem_rap[row - row_start] = Bd_fem_value;
     }
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    string name;
+    name = "A_fem_" + to_string(rank) + ".dat";
+    ofstream file;
+    file.open(name);
+
+    CSRMatrix *A_fem_csr = (CSRMatrix*)(A_fem_rap->on_proc);
+    int col, start, end;
+    double val;
+
+    file.precision(16);
+    file << row_start << " " << row_end << endl;
+
+    for (int row = 0; row < A_fem_csr->n_rows; row++)
+    {
+        start = A_fem_csr->idx1[row];
+        end = A_fem_csr->idx1[row+1];
+
+        for (int j = start; j < end; j++)
+        {
+            col = A_fem_csr->idx2[j];
+            val = A_fem_csr->vals[j];
+
+            file << row << " " << col << " " << val << endl;
+        }
+    }
+
+    file.close();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    exit(EXIT_SUCCESS);
 }
 
 // FEM Assembly
