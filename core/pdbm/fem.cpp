@@ -15,8 +15,8 @@
 #include <iomanip>
 
 // Raptor Headers
-#include "core/matrix.hpp"
-#include "core/vector.hpp"
+#include "core/par_matrix.hpp"
+#include "core/par_vector.hpp"
 
 // Hypre Headers
 #include "_hypre_utilities.h"
@@ -29,16 +29,13 @@ using namespace std;
 using namespace raptor;
 
 // Global variables definition
-//CSRMatrix *A_fem;
-//CSRMatrix *B_fem;
-//Vector f_bc;
-//Vector f_fem;
-//Vector u_bc;
-//Vector u_fem;
-//Vector Bf_bc;
-//Vector Bf_fem;
-//double *Binv_sem = NULL;
-//double *Bd_fem = NULL;
+ParCSRMatrix *A_fem_rap;
+ParCSRMatrix *B_fem_rap;
+ParVector f_fem_rap;
+ParVector u_fem_rap;
+ParVector Bf_fem_rap;
+ParVector Binv_sem_rap;
+ParVector Bd_fem_rap;
 
 long *ranking;
 long **dof_map;
@@ -72,36 +69,87 @@ void assemble_fem_matrices_()
     // Generate FEM Matrix
     fem_matrices();
 
-    // Vectors
-//    u_fem = Vector(max_rank);
-//    f_fem = Vector(max_rank);
-//    Bf_fem = Vector(max_rank);
-//
-//    // Free memory
-//    free_double_pointer(V_sem, n_x * n_y * n_z * n_elem);
-//    free_double_pointer(E_sem, num_sub_elem);
-//    free_double_pointer(E_fem, num_fem_elem);
-
+    int num_glo_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
+    int num_glo_cols = num_glo_rows;
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
+    int num_loc_rows = row_end - row_start + 1;
+    int num_loc_cols = num_glo_rows;
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &u_bc);
-    HYPRE_IJVectorSetObjectType(u_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(u_bc);
-    HYPRE_IJVectorAssemble(u_bc);
-    HYPRE_IJVectorGetObject(u_bc, (void**) &u_fem);
+//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &u_bc);
+//    HYPRE_IJVectorSetObjectType(u_bc, HYPRE_PARCSR);
+//    HYPRE_IJVectorInitialize(u_bc);
+//    HYPRE_IJVectorAssemble(u_bc);
+//    HYPRE_IJVectorGetObject(u_bc, (void**) &u_fem);
+//
+//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &f_bc);
+//    HYPRE_IJVectorSetObjectType(f_bc, HYPRE_PARCSR);
+//    HYPRE_IJVectorInitialize(f_bc);
+//    HYPRE_IJVectorAssemble(f_bc);
+//    HYPRE_IJVectorGetObject(f_bc, (void**) &f_fem);
+//
+//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Bf_bc);
+//    HYPRE_IJVectorSetObjectType(Bf_bc, HYPRE_PARCSR);
+//    HYPRE_IJVectorInitialize(Bf_bc);
+//    HYPRE_IJVectorAssemble(Bf_bc);
+//    HYPRE_IJVectorGetObject(Bf_bc, (void**) &Bf_fem);
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &f_bc);
-    HYPRE_IJVectorSetObjectType(f_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(f_bc);
-    HYPRE_IJVectorAssemble(f_bc);
-    HYPRE_IJVectorGetObject(f_bc, (void**) &f_fem);
+    // Transform to RAPtor
+    ParCOOMatrix *A_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
+    ParCOOMatrix *B_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Bf_bc);
-    HYPRE_IJVectorSetObjectType(Bf_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(Bf_bc);
-    HYPRE_IJVectorAssemble(Bf_bc);
-    HYPRE_IJVectorGetObject(Bf_bc, (void**) &Bf_fem);
+    for (int row = row_start; row <= row_end; row++)
+    {
+        // Add values
+        int num_cols;
+        int* cols;
+        double* values;
+
+        HYPRE_ParCSRMatrixGetRow(A_fem, row, &num_cols, &cols, &values);
+
+        for (int j = 0; j < num_cols; j++)
+        {
+            A_temp->add_global_value(row, cols[j], values[j]);
+        }
+
+        HYPRE_ParCSRMatrixRestoreRow(A_fem, row, &num_cols, &cols, &values);
+
+        HYPRE_ParCSRMatrixGetRow(B_fem, row, &num_cols, &cols, &values);
+
+        for (int j = 0; j < num_cols; j++)
+        {
+            B_temp->add_global_value(row, cols[j], values[j]);
+        }
+
+        HYPRE_ParCSRMatrixRestoreRow(B_fem, row, &num_cols, &cols, &values);
+    }
+
+    A_temp->finalize();
+    B_temp->finalize();
+
+    A_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
+    B_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
+
+    A_fem_rap->copy(A_temp);
+    B_fem_rap->copy(B_temp);
+
+    delete A_temp;
+    delete B_temp;
+
+    u_fem_rap = ParVector(num_glo_rows, num_loc_rows, row_start);
+    f_fem_rap = ParVector(num_glo_rows, num_loc_rows, row_start);
+    Bf_fem_rap = ParVector(num_glo_rows, num_loc_rows, row_start);
+    Bd_fem_rap = ParVector(num_glo_rows, num_loc_rows, row_start);
+
+    for (int row = row_start; row <= row_end; row++)
+    {
+        double Bd_fem_value;
+        double Binv_sem_value;
+
+        HYPRE_IJVectorGetValues(Bd_bc, 1, &row, &Bd_fem_value);
+
+        Bd_fem_rap[row - row_start] = Bd_fem_value;
+    }
 }
 
 // FEM Assembly
@@ -644,7 +692,7 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
     /*
      * Build parallel vector of inverse of SEM mass matrix
      */
-    int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
+    int num_glo_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
@@ -695,6 +743,19 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
 
     HYPRE_IJVectorAssemble(Binv_sem_bc);
     HYPRE_IJVectorDestroy(total_count);
+
+    // Raptor vectors
+    int num_loc_rows = row_end - row_start + 1;
+    Binv_sem_rap = ParVector(num_glo_rows, num_loc_rows, row_start);
+
+    for (int row = row_start; row <= row_end; row++)
+    {
+        double Binv_sem_value;
+
+        HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &row, &Binv_sem_value);
+
+        Binv_sem_rap[row - row_start] = Binv_sem_value;
+    }
 
 //    // OUTPUT
 //    long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
@@ -1060,7 +1121,6 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
 
     MPI_Scan(&last_ranking, &ranking_offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
     ranking_offset -= local_data[total_receive - 1].ranking;
->>>>>>> low_order_preconditioner
 
     if (rank > 0)
     {
@@ -1103,7 +1163,6 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
     {
         delete[] ranking_values[p];
         delete[] values_position[p];
->>>>>>> low_order_preconditioner
     }
 
     delete[] ranking_values;
@@ -1148,61 +1207,6 @@ void serial_ranking(long *ranking, long *array, int num_elems)
     for (int i = 0; i < num_elems; i++)
     {
         ranking[i] = array_sorting[i].second;
-    }
-}
-
-// Geometric functions
-double x_map(double r, double s)
-{
-    switch (mapping)
-    {
-        case 1:
-            // Parabola
-            return ((1.0 - lambda) * pow(s, 2.0) + lambda) * r;
-
-        case 2:
-            // Cosine
-            return ((1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s))) * r;
-
-        default:
-            // None
-            return r;
-    }
-}
-
-double y_map(double r, double s)
-{
-    switch (mapping)
-    {
-        case 1:
-            // Parabola
-            return s;
-
-        case 2:
-            // Cosine
-            return s;
-
-        default:
-            // None
-            return s;
-    }
-}
-
-double det_J_map(double r, double s)
-{
-    switch (mapping)
-    {
-        case 1:
-            // Parabola
-            return (1.0 - lambda) * pow(s, 2.0) + lambda;
-
-        case 2:
-            // Cosine
-            return (1.0 / 2.0) * (lambda + 1.0 + (lambda - 1.0) * cos(M_PI * s));
-
-        default:
-            // None
-            return 1.0;
     }
 }
 

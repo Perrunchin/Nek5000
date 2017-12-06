@@ -6,8 +6,8 @@
 #include <functional>
 
 // Raptor Headers
-#include "core/matrix.hpp"
-#include "core/vector.hpp"
+#include "core/par_matrix.hpp"
+#include "core/par_vector.hpp"
 
 // Hypre Headers
 #include "HYPRE.h"
@@ -22,13 +22,13 @@ using namespace std;
 #define FEM_H
 
 // Global variables declaration
-//extern CSRMatrix *A_fem;
-//extern CSRMatrix *B_fem;
-//extern Vector f_fem;
-//extern Vector u_fem;
-//extern Vector Bf_fem;
-//extern double *Binv_sem;
-//extern double *Bd_fem;
+extern ParCSRMatrix *A_fem_rap;
+extern ParCSRMatrix *B_fem_rap;
+extern ParVector f_fem_rap;
+extern ParVector u_fem_rap;
+extern ParVector Bf_fem_rap;
+extern ParVector Binv_sem_rap;
+extern ParVector Bd_fem_rap;
 
 extern long *ranking;
 extern long **dof_map;
@@ -37,16 +37,16 @@ extern HYPRE_IJMatrix A_bc;
 extern HYPRE_ParCSRMatrix A_fem;
 extern HYPRE_IJMatrix B_bc;
 extern HYPRE_ParCSRMatrix B_fem;
-extern HYPRE_IJVector f_bc;
-extern HYPRE_ParVector f_fem;
-extern HYPRE_IJVector u_bc;
-extern HYPRE_ParVector u_fem;
-extern HYPRE_IJVector Bf_bc;
-extern HYPRE_ParVector Bf_fem;
 extern HYPRE_IJVector Bd_bc;
 extern HYPRE_ParVector Bd_fem;
 extern HYPRE_IJVector Binv_sem_bc;
 extern HYPRE_ParVector Binv_sem;
+//extern HYPRE_IJVector f_bc;
+//extern HYPRE_ParVector f_fem;
+//extern HYPRE_IJVector u_bc;
+//extern HYPRE_ParVector u_fem;
+//extern HYPRE_IJVector Bf_bc;
+//extern HYPRE_ParVector Bf_fem;
 
 // Functions declaration
 extern "C"

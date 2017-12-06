@@ -128,7 +128,7 @@ objdir:
 
 nek5000:	objdir $(NOBJS)
 	$(FC) -c $(FL2) $(CASEDIR)/${CASENAME}.f $(VISITNEK_INCLUDES) -o ${OBJDIR}/${CASENAME}.o 
-	$(FC) $(FL2) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(HYPRE_DIR)/lib -lmpi_cxx -lHYPRE -lraptor -lblas -llapack
+	$(FC) $(FL2) -o ${BINNAME} ${OBJDIR}/${CASENAME}.o $(NOBJS) $(USR_LFLAGS) $(LDFLAGS) -lstdc++ -L$(HYPRE_DIR)/lib -L$(RAPTOR_LIB_DIR) -lmpi_cxx -lHYPRE -lraptor -lblas -llapack
 	@if test -f ${BINNAME}; then \
         echo ""; \
 	echo "#############################################################"; \
