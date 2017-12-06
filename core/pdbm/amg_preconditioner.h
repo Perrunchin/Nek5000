@@ -17,7 +17,6 @@ using namespace raptor;
 
 // Global variables
 extern ParMultilevel *amg_preconditioner;
-//extern HYPRE_Solver amg_preconditioner;
 
 extern "C"
 {

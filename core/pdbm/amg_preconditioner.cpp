@@ -27,7 +27,6 @@ using namespace raptor;
 
 // Global variables
 ParMultilevel *amg_preconditioner;
-//HYPRE_Solver amg_preconditioner;
 
 // Functions definitions
 void set_amg_preconditioner_()
@@ -36,22 +35,6 @@ void set_amg_preconditioner_()
     double strong_threshold = 0.25;
 
     amg_preconditioner = new ParMultilevel(A_fem_rap, strong_threshold);
-
-//    // Create solver
-//    HYPRE_BoomerAMGCreate(&amg_preconditioner);
-//
-//    // Set some parameters (See Reference Manual for more parameters)
-//    HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-//    HYPRE_BoomerAMGSetOldDefault(amg_preconditioner); // Falgout coarsening with modified classical interpolaiton
-//    HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation
-//    HYPRE_BoomerAMGSetRelaxOrder(amg_preconditioner, 1); // uses C/F relaxation
-//    HYPRE_BoomerAMGSetNumSweeps(amg_preconditioner, 1); // Sweeeps on each level
-//    HYPRE_BoomerAMGSetMaxLevels(amg_preconditioner, 20); // maximum number of levels
-//    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 40); // maximum number of V-cycles
-//    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-2); // convergence tolerance
-//
-//    // Setup preconditioner
-//    HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
 }
 
 void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_vector)
@@ -65,10 +48,8 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = false;
-    bool mass_diagonal = false;
-
-//    HYPRE_IJVectorInitialize(f_bc);
+    bool mass_matrix_precond = true;
+    bool mass_diagonal = true;
 
     if (!mass_matrix_precond)
     {
@@ -80,80 +61,49 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
             {
                 int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
 
-//                HYPRE_IJVectorSetValues(f_bc, 1, &row, &right_hand_side_vector[idx]);
                 f_fem_rap[row - row_start] = right_hand_side_vector[idx];
             }
         }
     }
-//    else
-//    {
-//        if (mass_diagonal)
-//        {
-//            for (int i = 0; i < num_loc_dofs; i++)
-//            {
-//                int row = ranking[i];
-//
-//                if ((row_start <= row) and (row <= row_end))
-//                {
-//                    double Bd_fem_value;
-//                    double Binv_sem_value;
-//                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
-//
-//                    HYPRE_IJVectorGetValues(Bd_bc, 1, &row, &Bd_fem_value);
-//                    HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &row, &Binv_sem_value);
-//
-//                    double value = Bd_fem_value * Binv_sem_value * right_hand_side_vector[idx];
-//
-//                    HYPRE_IJVectorSetValues(f_bc, 1, &row, &value);
-//                }
-//            }
-//        }
-//        else
-//        {
-//            for (int i = 0; i < num_loc_dofs; i++)
-//            {
-//                int row = ranking[i];
-//
-//                if ((row_start <= row) and (row <= row_end))
-//                {
-//                    double Binv_sem_value;
-//                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
-//
-//                    HYPRE_IJVectorGetValues(Binv_sem_bc, 1, &row, &Binv_sem_value);
-//
-//                    double value = Binv_sem_value * right_hand_side_vector[idx];
-//
-//                    HYPRE_IJVectorSetValues(Bf_bc, 1, &row, &value);
-//                }
-//            }
-//
-//            HYPRE_ParCSRMatrixMatvec(1.0, B_fem, Bf_fem, 0.0, f_fem);
-//        }
-//    }
-//
-//    HYPRE_IJVectorAssemble(f_bc);
+    else
+    {
+        if (mass_diagonal)
+        {
+            for (int i = 0; i < num_loc_dofs; i++)
+            {
+                int row = ranking[i];
 
-    // Solve preconditioned system
-//    printf("A_fem:\n");
-//    ((CSRMatrix*)(A_fem_rap->on_proc))->print();
-//    printf("\n");
-//
-//    printf("f:\n");
-//    f_fem_rap.local.print();
-//    printf("\n");
-//
+                if ((row_start <= row) and (row <= row_end))
+                {
+                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+                    double Bd_fem_value = Bd_fem_rap[row - row_start];
+                    double Binv_sem_value = Binv_sem_rap[row - row_start];
 
+                    f_fem_rap[row - row_start] = Bd_fem_value * Binv_sem_value * right_hand_side_vector[idx];
+                }
+            }
+        }
+        else
+        {
+            for (int i = 0; i < num_loc_dofs; i++)
+            {
+                int row = ranking[i];
+
+                if ((row_start <= row) and (row <= row_end))
+                {
+                    int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+                    double Binv_sem_value = Binv_sem_rap[row - row_start];
+
+                    Bf_fem_rap[row - row_start] = Binv_sem_value * right_hand_side_vector[idx];
+                }
+            }
+
+            B_fem_rap->mult(Bf_fem_rap, f_fem_rap);
+        }
+    }
+
+    // Solve preconditioning linear system
     amg_preconditioner->solve(u_fem_rap, f_fem_rap);
-
-//    printf("u:\n");
-//    u_fem_rap.local.print();
-//    printf("\n");
-//
-//    MPI_Barrier(MPI_COMM_WORLD);
-//    exit(EXIT_SUCCESS);
-//    asm("int $3");
-
-//    HYPRE_BoomerAMGSolve(amg_preconditioner, A_fem, f_fem, u_fem);
 
     double u_loc[num_loc_dofs];
 
@@ -163,7 +113,6 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         if ((row_start <= row) and (row <= row_end))
         {
-//            HYPRE_IJVectorGetValues(u_bc, 1, &row, &u_loc[i]);
             u_loc[i] = u_fem_rap[row - row_start];
         }
         else

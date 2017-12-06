@@ -44,12 +44,6 @@ HYPRE_IJMatrix A_bc;
 HYPRE_ParCSRMatrix A_fem;
 HYPRE_IJMatrix B_bc;
 HYPRE_ParCSRMatrix B_fem;
-HYPRE_IJVector f_bc;
-HYPRE_ParVector f_fem;
-HYPRE_IJVector u_bc;
-HYPRE_ParVector u_fem;
-HYPRE_IJVector Bf_bc;
-HYPRE_ParVector Bf_fem;
 HYPRE_IJVector Bd_bc;
 HYPRE_ParVector Bd_fem;
 HYPRE_IJVector Binv_sem_bc;
@@ -74,29 +68,11 @@ void assemble_fem_matrices_()
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
     int num_loc_rows = row_end - row_start + 1;
-    int num_loc_cols = num_glo_rows;
-
-//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &u_bc);
-//    HYPRE_IJVectorSetObjectType(u_bc, HYPRE_PARCSR);
-//    HYPRE_IJVectorInitialize(u_bc);
-//    HYPRE_IJVectorAssemble(u_bc);
-//    HYPRE_IJVectorGetObject(u_bc, (void**) &u_fem);
-//
-//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &f_bc);
-//    HYPRE_IJVectorSetObjectType(f_bc, HYPRE_PARCSR);
-//    HYPRE_IJVectorInitialize(f_bc);
-//    HYPRE_IJVectorAssemble(f_bc);
-//    HYPRE_IJVectorGetObject(f_bc, (void**) &f_fem);
-//
-//    HYPRE_IJVectorCreate(MPI_COMM_WORLD, row_start, row_end, &Bf_bc);
-//    HYPRE_IJVectorSetObjectType(Bf_bc, HYPRE_PARCSR);
-//    HYPRE_IJVectorInitialize(Bf_bc);
-//    HYPRE_IJVectorAssemble(Bf_bc);
-//    HYPRE_IJVectorGetObject(Bf_bc, (void**) &Bf_fem);
+    int num_loc_cols = num_loc_rows;
 
     // Transform to RAPtor
-    ParCOOMatrix *A_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
-    ParCOOMatrix *B_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
+    ParCOOMatrix *A_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, row_start);
+    ParCOOMatrix *B_temp = new ParCOOMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, row_start);
 
     for (int row = row_start; row <= row_end; row++)
     {
@@ -127,8 +103,8 @@ void assemble_fem_matrices_()
     A_temp->finalize();
     B_temp->finalize();
 
-    A_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
-    B_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, 0);
+    A_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, row_start);
+    B_fem_rap = new ParCSRMatrix(num_glo_rows, num_glo_cols, num_loc_rows, num_loc_cols, row_start, row_start);
 
     A_fem_rap->copy(A_temp);
     B_fem_rap->copy(B_temp);
@@ -150,39 +126,6 @@ void assemble_fem_matrices_()
 
         Bd_fem_rap[row - row_start] = Bd_fem_value;
     }
-
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    string name;
-    name = "A_fem_" + to_string(rank) + ".dat";
-    ofstream file;
-    file.open(name);
-
-    CSRMatrix *A_fem_csr = (CSRMatrix*)(A_fem_rap->on_proc);
-    int col, start, end;
-    double val;
-
-    file.precision(16);
-    file << row_start << " " << row_end << endl;
-
-    for (int row = 0; row < A_fem_csr->n_rows; row++)
-    {
-        start = A_fem_csr->idx1[row];
-        end = A_fem_csr->idx1[row+1];
-
-        for (int j = start; j < end; j++)
-        {
-            col = A_fem_csr->idx2[j];
-            val = A_fem_csr->vals[j];
-
-            file << row << " " << col << " " << val << endl;
-        }
-    }
-
-    file.close();
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    exit(EXIT_SUCCESS);
 }
 
 // FEM Assembly

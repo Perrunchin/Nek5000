@@ -41,12 +41,6 @@ extern HYPRE_IJVector Bd_bc;
 extern HYPRE_ParVector Bd_fem;
 extern HYPRE_IJVector Binv_sem_bc;
 extern HYPRE_ParVector Binv_sem;
-//extern HYPRE_IJVector f_bc;
-//extern HYPRE_ParVector f_fem;
-//extern HYPRE_IJVector u_bc;
-//extern HYPRE_ParVector u_fem;
-//extern HYPRE_IJVector Bf_bc;
-//extern HYPRE_ParVector Bf_fem;
 
 // Functions declaration
 extern "C"
