@@ -34,8 +34,8 @@ void set_amg_preconditioner_()
     HYPRE_BoomerAMGSetRelaxOrder(amg_preconditioner, 1); // uses C/F relaxation
     HYPRE_BoomerAMGSetNumSweeps(amg_preconditioner, 1); // Sweeeps on each level
     HYPRE_BoomerAMGSetMaxLevels(amg_preconditioner, 20); // maximum number of levels
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 40); // maximum number of V-cycles
-    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-2); // convergence tolerance
+    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 1); // maximum number of V-cycles
+    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-3); // convergence tolerance
 
     // Setup preconditioner
     HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
