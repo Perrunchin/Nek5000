@@ -103,7 +103,7 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     }
 
     // Solve preconditioning linear system
-    amg_preconditioner->solve(u_fem_rap, f_fem_rap);
+    amg_preconditioner->solve(u_fem_rap, f_fem_rap, NULL, 1);
 
     double u_loc[num_loc_dofs];
 
