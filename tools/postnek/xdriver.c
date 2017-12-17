@@ -1469,7 +1469,8 @@ SetUpEnv (void)
    /* use 12pt for big window */
    if (windoww >= 700) 
    {
-      font = "-Adobe-Helvetica-Medium-R-Normal--12-120-75-75-P-67-ISO8859-1";
+//      font = "-Adobe-Helvetica-Medium-R-Normal--12-120-75-75-P-67-ISO8859-1";
+      font = "-bitstream-courier 10 pitch-medium-i-normal--0-0-0-0-m-0-adobe-standard";
       textFontInfo = XLoadQueryFont(dpy,font);
       if (!textFontInfo)
       {
