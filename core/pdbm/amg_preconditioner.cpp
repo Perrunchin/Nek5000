@@ -34,7 +34,7 @@ void set_amg_preconditioner_()
     // Create solver
     double strong_threshold = 0.25;
 
-    amg_preconditioner = new ParMultilevel(A_fem_rap, strong_threshold);
+    amg_preconditioner = new ParMultilevel(A_fem_rap, strong_threshold, CLJP, Classical, SOR);
 }
 
 void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_vector)
@@ -104,6 +104,8 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
     // Solve preconditioning linear system
     amg_preconditioner->solve(u_fem_rap, f_fem_rap, NULL, 1);
+//    amg_preconditioner->set_res_tol(1.0e-7);
+//    amg_preconditioner->solve(u_fem_rap, f_fem_rap);
 
     double u_loc[num_loc_dofs];
 

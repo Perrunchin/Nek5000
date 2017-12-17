@@ -371,7 +371,7 @@ c
       call col2(res, pmask, n)
 
       outer = 0
-      do while (iconv.eq.0.and.iter.lt.500)
+      do while (iconv.eq.0.and.iter.lt.2000)
          outer = outer+1
 
          if(iter.eq.0) then                   !      -1
