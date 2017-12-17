@@ -386,9 +386,19 @@ void fem_matrices()
         }
     }
 
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        dof_map[2][i] += 1;
+    }
+
     set_amg_gs_handle_(dof_map[2], num_loc_dofs);
 
-    long compression[num_loc_dofs];
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        dof_map[2][i] -= 1;
+    }
+
+    long *compression = mem_alloc<long>(num_loc_dofs);
     long offset = 0;
 
     if (rank < size - 1)
@@ -491,7 +501,7 @@ void fem_matrices()
     HYPRE_IJMatrixGetObject(B_f, (void**) &B_f_csr);
 
     // TODO: Notify everyone of what rows are to be removed
-    long glo_map[num_vert];
+    long *glo_map = mem_alloc<long>(num_vert);
 
     for (int i = 0; i < num_vert; i++)
     {
@@ -505,7 +515,7 @@ void fem_matrices()
 
     MPI_Allreduce(MPI_IN_PLACE, glo_map, num_vert, MPI_LONG, MPI_MAX, MPI_COMM_WORLD);
 
-    double glo_press_mask[num_vert];
+    double *glo_press_mask = mem_alloc<double>(num_vert);
 
     for (int i = 0; i < num_vert; i++)
     {
@@ -658,6 +668,9 @@ void fem_matrices()
     mem_free<double>(J_rx, n_dim, n_dim);
     mem_free<double>(x_t, n_dim, n_dim);
     mem_free<double>(q_x, n_dim);
+    mem_free<long>(compression, num_loc_dofs);
+    mem_free<long>(glo_map, num_vert);
+    mem_free<double>(glo_press_mask, num_vert);
     mem_free<double>(Bd_sum, num_rows);
     HYPRE_IJMatrixDestroy(A_f);
     HYPRE_IJMatrixDestroy(B_f);
