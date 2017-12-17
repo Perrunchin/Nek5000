@@ -8,11 +8,11 @@ bin_nek_tools=`cd ../bin && pwd`
 
 # Fortran compiler
 FC="gfortran"
-FFLAGS="-g -mcmodel=medium"
+FFLAGS="-mcmodel=medium"
 
 # C compiler
 CC="gcc"
-CFLAGS="-g -mcmodel=medium"
+CFLAGS="-mcmodel=medium"
 
 # linking flags
 #LDFLAGS="-L$HOME/lib -lm"
