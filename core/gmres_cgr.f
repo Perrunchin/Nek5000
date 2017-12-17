@@ -334,12 +334,6 @@ c     data    iflag,if_hyb  /.false. , .true. /
       save    norm_fac
 
       real*8 etime1,dnekclock
-      real*8 prec_time
-
-      ! AMG Preconditioner
-      logical use_amg
-
-      use_amg = .true.
 
       n = lx1*ly1*lz1*nelv
 
@@ -348,6 +342,8 @@ c     data    iflag,if_hyb  /.false. , .true. /
       divex = 0.
       iter  = 0
       m     = lgmres
+
+      call gcr(x_gmres,res,h1,h2,wt,pmask,m,n)
 
       if(.not.iflag) then
          iflag=.true.
@@ -367,11 +363,8 @@ c
       iconv = 0
       call rzero(x_gmres,n)
 
-      call rand_fld_h1(res)
-      call col2(res, pmask, n)
-
       outer = 0
-      do while (iconv.eq.0.and.iter.lt.2000)
+      do while (iconv.eq.0.and.iter.lt.500)
          outer = outer+1
 
          if(iter.eq.0) then                   !      -1
@@ -411,12 +404,7 @@ c . . . . . Overlapping Schwarz + coarse-grid . . . . . . .
 
 c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
             if (ifmgrid) then
-               if (.not. use_amg) then
-                   call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
-                                                                !  j
-               else
-                   call amg_fem_preconditioner(z_gmres(1, j), w_gmres)
-               endif
+               call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
             else                                            !  j
                kfldfdm = ldim+1
                if (param(100).eq.2) then
@@ -430,7 +418,6 @@ c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
                call add2         (z_gmres(1,j),wk,n) !  j        
             endif
 
-            write(*, *) "Prec Time: ", dnekclock() - etime2
 
             call ortho        (z_gmres(1,j)) ! Orthogonalize wrt null space, if present
             etime_p = etime_p + dnekclock()-etime2
@@ -1354,4 +1341,68 @@ c-----------------------------------------------------------------------
       return
       END
 c-----------------------------------------------------------------------
+      subroutine gcr(x,r,h1,h2,wt,mask,iter,n)
+      include 'SIZE'
+      include 'TOTAL'
 
+      real x(n),r(n),h1(n),h2(n),wt(n),mask(n)
+
+      parameter (lt=lx1*ly1*lz1*lelt)
+      common /mybigarray/ w(lt,lgmres),p(lt,lgmres),s(lt,lgmres)
+      real tol
+
+      ! AMG Preconditioner
+      logical use_amg
+
+      use_amg = .true.
+      tol = 1.0e-6
+
+      call rzero(x,n)
+      call col2 (r,mask,n)
+
+!      call rand_fld_h1(x)
+!      call rzero(r, n)
+
+      maxiter = min(iter,lgmres)
+      do k=1,maxiter
+         if (.not. use_amg) then
+           call h1mg_solve(p(1,k),r,if_hyb) ! p = Minv r
+         else
+           call amg_fem_preconditioner(p(1, k), r)
+         endif
+
+         call ax        (w(1,k),p(1,k),h1,h2,n) ! w = A p
+
+         do j=1,k-1            !     Projection step
+           betaj = -glsc3(w(1,j),wt,w(1,k),n)/glsc3(w(1,j),wt,w(1,j),n)
+           call add2s2(p(1,k),p(1,j),betaj,n)
+           call add2s2(w(1,k),w(1,j),betaj,n)
+         enddo
+!        call ax (w(1,k),p(1,k),h1,h2,n) ! w = A p
+
+         alpha = glsc3(w(1,k),wt,r,n)/glsc3(w(1,k),wt,w(1,k),n) 
+         alphm = -alpha
+
+         call add2s2(x,p(1,k),alpha,n)
+         call add2s2(r,w(1,k),alphm,n)
+
+         call copy (s(1,k),x,n)  ! Save
+
+         rnorm = sqrt(glsc3(r,binvm1,r,n)/volvm1)
+         if (nio.eq.0) write(6,*) istep,k,rnorm,' CGR residual'
+
+         if (rnorm .lt. tol) then
+           exit
+         endif
+      enddo
+
+      maxiter = k
+
+!      do k=1,maxiter
+!         call outpost(p(1,k),vy,vz,s(1,k),t,'   ')
+!      enddo
+      call exitti('quit in gcr$',maxiter)
+
+      return
+      end
+c-----------------------------------------------------------------------

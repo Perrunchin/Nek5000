@@ -28,14 +28,17 @@ void set_amg_preconditioner_()
     HYPRE_BoomerAMGCreate(&amg_preconditioner);
 
     // Set some parameters (See Reference Manual for more parameters)
+    HYPRE_BoomerAMGSetMaxRowSum(amg_preconditioner, 1); // Don't check for maximum row sum
+    HYPRE_BoomerAMGSetCoarsenType(amg_preconditioner, 0); // 0 for CLJP, 6 for Falgout
+    HYPRE_BoomerAMGSetInterpType(amg_preconditioner, 0); // Interpolation type, 0 for classical modified interpolation
+    HYPRE_BoomerAMGSetPMaxElmts(amg_preconditioner, 0); // Maximum number of elements per row for interpolation
+    HYPRE_BoomerAMGSetAggNumLevels(amg_preconditioner, 0); // 0 for no-aggressive coarsening
+    HYPRE_BoomerAMGSetStrongThreshold(amg_preconditioner, 0.25); // Strength threshold
+    HYPRE_BoomerAMGSetMaxCoarseSize(amg_preconditioner, 50); // maximum number of rows in coarse level
+    HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation, 3 means SOR
     HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-    HYPRE_BoomerAMGSetOldDefault(amg_preconditioner); // Falgout coarsening with modified classical interpolaiton
-    HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation
-    HYPRE_BoomerAMGSetRelaxOrder(amg_preconditioner, 1); // uses C/F relaxation
-    HYPRE_BoomerAMGSetNumSweeps(amg_preconditioner, 1); // Sweeeps on each level
-    HYPRE_BoomerAMGSetMaxLevels(amg_preconditioner, 20); // maximum number of levels
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 1); // maximum number of V-cycles
-    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-3); // convergence tolerance
+    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 100); // maximum number of V-cycles
+    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-9); // convergence tolerance
 
     // Setup preconditioner
     HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
@@ -52,7 +55,7 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = false;
+    bool mass_matrix_precond = true;
     bool mass_diagonal = false;
 
     HYPRE_IJVectorInitialize(f_bc);
