@@ -41,6 +41,10 @@ HYPRE_IJVector Bd_bc;
 HYPRE_ParVector Bd_fem;
 HYPRE_IJVector Binv_sem_bc;
 HYPRE_ParVector Binv_sem;
+int* ia;
+int* ja;
+double* a;
+int nnz;
 
 // Structures
 struct VertexID
@@ -116,6 +120,12 @@ void fem_matrices()
     HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start, idx_end, idx_start, idx_end, &B_f);
     HYPRE_IJMatrixSetObjectType(B_f, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(B_f);
+
+    int num_points = n_x * n_y * n_z * n_elem;
+    HYPRE_IJMatrix A_nek;
+    HYPRE_IJMatrixCreate(MPI_COMM_SELF, 0, num_points - 1, 0, num_points - 1, &A_nek);
+    HYPRE_IJMatrixSetObjectType(A_nek, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(A_nek);
 
     // Set quadrature rule
     int n_quad = (n_dim == 2) ? 3 : 4;
@@ -297,6 +307,32 @@ void fem_matrices()
                                 }
                             }
                         }
+
+                        // Add to Nek matrix
+                        for (int i = 0; i < n_dim + 1; i++)
+                        {
+                            for (int j = 0; j < n_dim + 1; j++)
+                            {
+                                int row = idx[t_map[t][i]] + e * (n_x * n_y * n_z);
+                                int col = idx[t_map[t][j]] + e * (n_x * n_y * n_z);
+
+                                double A_val = A_loc[i][j];
+
+                                int ncols = 1;
+                                int insert_error;
+
+                                if (std::abs(A_val) > 1.0e-14)
+                                {
+                                    insert_error = HYPRE_IJMatrixAddToValues(A_nek, 1, &ncols, &row, &col, &A_val);
+                                }
+
+                                if (insert_error != 0)
+                                {
+                                    printf("There was an error with entry A_nek(%d, %d) = %f\n", row, col, A_val);
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -305,6 +341,54 @@ void fem_matrices()
 
     HYPRE_IJMatrixAssemble(A_f);
     HYPRE_IJMatrixAssemble(B_f);
+    HYPRE_IJMatrixAssemble(A_nek);
+
+    // Create COO objects to be passed to Nek
+    HYPRE_ParCSRMatrix A_nek_csr;
+    HYPRE_IJMatrixGetObject(A_nek, (void**) &A_nek_csr);
+
+    nnz = 0;
+
+    for (int i = 0; i < num_points; i++)
+    {
+        // Add values
+        int n_cols;
+        int* cols;
+        double* values;
+
+        HYPRE_ParCSRMatrixGetRow(A_nek_csr, i, &n_cols, &cols, &values);
+
+        nnz += n_cols;
+
+        HYPRE_ParCSRMatrixRestoreRow(A_nek_csr, i, &n_cols, &cols, &values);
+    }
+
+    ia = mem_alloc<int>(nnz);
+    ja = mem_alloc<int>(nnz);
+    a = mem_alloc<double>(nnz);
+
+    nnz = 0;
+
+    for (int i = 0; i < num_points; i++)
+    {
+        // Add values
+        int n_cols;
+        int* cols;
+        double* values;
+
+        HYPRE_ParCSRMatrixGetRow(A_nek_csr, i, &n_cols, &cols, &values);
+
+        for (int j = 0; j < n_cols; j++)
+        {
+            ia[nnz] = i;
+            ja[nnz] = cols[j];
+            a[nnz] = values[j];
+
+            nnz++;
+        }
+
+        HYPRE_ParCSRMatrixRestoreRow(A_nek_csr, i, &n_cols, &cols, &values);
+    }
 
     // Rank vertices after boundary conditions are removed
     num_loc_dofs = 0;
@@ -625,6 +709,7 @@ void fem_matrices()
     mem_free<double>(Bd_sum, num_rows);
     HYPRE_IJMatrixDestroy(A_f);
     HYPRE_IJMatrixDestroy(B_f);
+    HYPRE_IJMatrixDestroy(A_nek);
 }
 
 void set_sem_inverse_mass_matrix_(double* inv_B)
@@ -723,6 +808,18 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
 //
 //    HYPRE_IJVectorPrint(Binv_sem_bc, "Binv_sem_bc");
 //    // END OUTPUT
+}
+
+void set_nek_amg_matrices_(double *a_, int *ia_, int *ja_, int &nnz_)
+{
+    for (int i = 0; i < nnz; i++)
+    {
+        a_[i] = a[i];
+        ia_[i] = ia[i];
+        ja_[i] = ja[i];
+    }
+
+    nnz_ = nnz;
 }
 
 void quadrature_rule(double **&q_r, double *&q_w, int n_quad, int n_dim)

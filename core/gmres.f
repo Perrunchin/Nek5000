@@ -326,6 +326,9 @@ c     GMRES iteration.
       real alpha, l, temp
       integer outer
 
+      common /fem_i/ xxth_fem
+      integer xxth_fem
+
       logical iflag,if_hyb
       save    iflag,if_hyb
 c     data    iflag,if_hyb  /.false. , .true. /
@@ -415,7 +418,7 @@ c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
                    call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
                                                                 !  j
                else
-                   call amg_fem_preconditioner(z_gmres(1, j), w_gmres)
+                   call fgslib_crs_solve(xxth_fem,z_gmres(1,j),w_gmres)
                endif
             else                                            !  j
                kfldfdm = ldim+1

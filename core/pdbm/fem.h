@@ -34,6 +34,10 @@ extern HYPRE_IJVector Bd_bc;
 extern HYPRE_ParVector Bd_fem;
 extern HYPRE_IJVector Binv_sem_bc;
 extern HYPRE_ParVector Binv_sem;
+extern int* ia;
+extern int* ja;
+extern double* a;
+extern int nnz;
 
 // Functions declaration
 extern "C"
@@ -45,6 +49,7 @@ extern "C"
     void set_amg_gs_handle_(long*, int&);
     void compress_data_(long*, int&);
     void distribute_data_(double*, int&);
+    void set_nek_amg_matrices_(double*, int*, int*, int&);
 }
 
 // FEM Assembly
