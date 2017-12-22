@@ -418,6 +418,7 @@ c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
                    call h1mg_solve(z_gmres(1,j),w_gmres,if_hyb) ! z  = M   w
                                                                 !  j
                else
+                   call mass_matrix_preconditioning(w_gmres)
                    call fgslib_crs_solve(xxth_fem,z_gmres(1,j),w_gmres)
                endif
             else                                            !  j

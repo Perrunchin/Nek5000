@@ -19,35 +19,12 @@
 #include "_hypre_parcsr_ls.h"
 
 // Global variables
-HYPRE_Solver amg_preconditioner;
 
 // Functions definitions
-void set_amg_preconditioner_()
-{
-    // Create solver
-    HYPRE_BoomerAMGCreate(&amg_preconditioner);
-
-    // Set some parameters (See Reference Manual for more parameters)
-    HYPRE_BoomerAMGSetMaxRowSum(amg_preconditioner, 1); // Don't check for maximum row sum
-    HYPRE_BoomerAMGSetCoarsenType(amg_preconditioner, 0); // 0 for CLJP, 6 for Falgout
-    HYPRE_BoomerAMGSetInterpType(amg_preconditioner, 0); // Interpolation type, 0 for classical modified interpolation
-    HYPRE_BoomerAMGSetPMaxElmts(amg_preconditioner, 0); // Maximum number of elements per row for interpolation
-    HYPRE_BoomerAMGSetAggNumLevels(amg_preconditioner, 0); // 0 for no-aggressive coarsening
-    HYPRE_BoomerAMGSetStrongThreshold(amg_preconditioner, 0.25); // Strength threshold
-    HYPRE_BoomerAMGSetMaxCoarseSize(amg_preconditioner, 50); // maximum number of rows in coarse level
-    HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation, 3 means SOR
-    HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 100); // maximum number of V-cycles
-    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-9); // convergence tolerance
-
-    // Setup preconditioner
-    HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
-}
-
-void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_vector)
+void mass_matrix_preconditioning_(double *right_hand_side_vector)
 {
     /*
-     * Solves the system $\boldsymbol{M} \boldsymbol{r} = \boldsymbol{z}$ using Algebraic Multigrid
+     * Updates the rhs when using mass matrix preconditioning
      */
     // Distribute RHS values to their corresponding processors
     int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
@@ -58,24 +35,14 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     bool mass_matrix_precond = true;
     bool mass_diagonal = false;
 
-    HYPRE_IJVectorInitialize(f_bc);
-
     if (!mass_matrix_precond)
     {
-        for (int i = 0; i < num_loc_dofs; i++)
-        {
-            int row = ranking[i];
-
-            if ((row_start <= row) and (row <= row_end))
-            {
-                int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
-
-                HYPRE_IJVectorSetValues(f_bc, 1, &row, &right_hand_side_vector[idx]);
-            }
-        }
+        return;
     }
     else
     {
+        HYPRE_IJVectorInitialize(f_bc);
+
         if (mass_diagonal)
         {
             for (int i = 0; i < num_loc_dofs; i++)
@@ -118,14 +85,12 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
             HYPRE_ParCSRMatrixMatvec(1.0, B_fem, Bf_fem, 0.0, f_fem);
         }
+
+        HYPRE_IJVectorAssemble(f_bc);
     }
 
-    HYPRE_IJVectorAssemble(f_bc);
-
     // Solve preconditioned system
-    HYPRE_BoomerAMGSolve(amg_preconditioner, A_fem, f_fem, u_fem);
-
-    double u_loc[num_loc_dofs];
+    double f_loc[num_loc_dofs];
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
@@ -133,15 +98,13 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         if ((row_start <= row) and (row <= row_end))
         {
-            HYPRE_IJVectorGetValues(u_bc, 1, &row, &u_loc[i]);
+            HYPRE_IJVectorGetValues(f_bc, 1, &row, &f_loc[i]);
         }
         else
         {
-            u_loc[i] = - numeric_limits<double>::max();
+            f_loc[i] = 0.0;
         }
     }
-
-    distribute_data_(u_loc, num_loc_dofs);
 
     for (int e = 0; e < n_elem; e++)
     {
@@ -149,7 +112,7 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
         {
             int idx = i + e * (n_x * n_y * n_z);
 
-            solution_vector[idx] = 0.0;
+            right_hand_side_vector[idx] = 0.0;
         }
     }
 
@@ -157,6 +120,6 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     {
         int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
 
-        solution_vector[idx] = u_loc[i];
+        right_hand_side_vector[idx] = f_loc[i];
     }
 }

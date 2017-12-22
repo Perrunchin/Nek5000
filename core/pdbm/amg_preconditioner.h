@@ -14,8 +14,7 @@ extern HYPRE_Solver amg_preconditioner;
 
 extern "C"
 {
-    void amg_fem_preconditioner_(double*, double*);
-    void set_amg_preconditioner_();
+    void mass_matrix_preconditioning_(double*);
 }
 
 #endif
