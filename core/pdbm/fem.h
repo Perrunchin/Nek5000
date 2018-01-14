@@ -49,7 +49,6 @@ extern "C"
     void set_amg_gs_handle_(long*, int&);
     void compress_data_(long*, int&);
     void distribute_data_(double*, int&);
-    void set_nek_amg_matrices_(double*, int*, int*, int&);
 }
 
 // FEM Assembly

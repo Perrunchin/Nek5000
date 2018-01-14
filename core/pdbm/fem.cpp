@@ -810,18 +810,6 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
 //    // END OUTPUT
 }
 
-void set_nek_amg_matrices_(double *a_, int *ia_, int *ja_, int &nnz_)
-{
-    for (int i = 0; i < nnz; i++)
-    {
-        a_[i] = a[i];
-        ia_[i] = ia[i];
-        ja_[i] = ja[i];
-    }
-
-    nnz_ = nnz;
-}
-
 void quadrature_rule(double **&q_r, double *&q_w, int n_quad, int n_dim)
 {
     q_r = mem_alloc<double>(n_quad, n_dim);

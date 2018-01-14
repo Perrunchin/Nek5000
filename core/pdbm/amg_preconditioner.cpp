@@ -21,18 +21,23 @@
 // Global variables
 
 // Functions definitions
+void set_amg_preconditioner_()
+{
+    // Create AMG preconditioner
+    setup_amg_(ia, ja, a, nnz);
+}
+
 void mass_matrix_preconditioning_(double *right_hand_side_vector)
 {
     /*
      * Updates the rhs when using mass matrix preconditioning
      */
     // Distribute RHS values to their corresponding processors
-    int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = true;
+    bool mass_matrix_precond = false;
     bool mass_diagonal = false;
 
     if (!mass_matrix_precond)
@@ -89,23 +94,7 @@ void mass_matrix_preconditioning_(double *right_hand_side_vector)
         HYPRE_IJVectorAssemble(f_bc);
     }
 
-    // Solve preconditioned system
-    double f_loc[num_loc_dofs];
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        int row = ranking[i];
-
-        if ((row_start <= row) and (row <= row_end))
-        {
-            HYPRE_IJVectorGetValues(f_bc, 1, &row, &f_loc[i]);
-        }
-        else
-        {
-            f_loc[i] = 0.0;
-        }
-    }
-
+    // Distribute values to nodes but don't assemble them
     for (int e = 0; e < n_elem; e++)
     {
         for (int i = 0; i < n_x * n_y * n_z; i++)
@@ -116,10 +105,28 @@ void mass_matrix_preconditioning_(double *right_hand_side_vector)
         }
     }
 
+    int num_rows = row_end - row_start + 1;
+    double *visited = mem_alloc<double>(num_rows);
+
+    for (int row = 0; row < num_rows; row++)
+    {
+        visited[row] = 0.0;
+    }
+
     for (int i = 0; i < num_loc_dofs; i++)
     {
-        int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+        int row = ranking[i];
 
-        right_hand_side_vector[idx] = f_loc[i];
+        if ((row_start <= row) and (row <= row_end))
+        {
+            if (visited[row - row_start] == 0.0)
+            {
+                int idx = dof_map[0][i] + dof_map[1][i] * (n_x * n_y * n_z);
+
+                HYPRE_IJVectorGetValues(f_bc, 1, &row, &right_hand_side_vector[idx]);
+
+                visited[row - row_start] = 1.0;
+            }
+        }
     }
 }
