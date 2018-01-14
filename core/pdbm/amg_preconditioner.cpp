@@ -43,7 +43,6 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
      * Solves the system $\boldsymbol{M} \boldsymbol{r} = \boldsymbol{z}$ using Algebraic Multigrid
      */
     // Distribute RHS values to their corresponding processors
-    int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
@@ -108,6 +107,13 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 //    amg_preconditioner->solve(u_fem_rap, f_fem_rap);
 
     double u_loc[num_loc_dofs];
+    int num_rows = row_end - row_start + 1;
+    double *visited = mem_alloc<double>(num_rows);
+
+    for (int row = 0; row < num_rows; row++)
+    {
+        visited[row] = 0.0;
+    }
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
@@ -115,11 +121,20 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         if ((row_start <= row) and (row <= row_end))
         {
-            u_loc[i] = u_fem_rap[row - row_start];
+            if (visited[row - row_start] == 0.0)
+            {
+                u_loc[i] = u_fem_rap[row - row_start];
+
+                visited[row - row_start] = 1.0;
+            }
+            else
+            {
+                u_loc[i] = 0.0;
+            }
         }
         else
         {
-            u_loc[i] = - numeric_limits<double>::max();
+            u_loc[i] = 0.0;
         }
     }
 
