@@ -37,8 +37,8 @@ void set_amg_preconditioner_()
     HYPRE_BoomerAMGSetMaxCoarseSize(amg_preconditioner, 50); // maximum number of rows in coarse level
     HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation, 3 means SOR
     HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 100); // maximum number of V-cycles
-    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-9); // convergence tolerance
+    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 1); // maximum number of V-cycles
+    HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-7); // convergence tolerance
 
     // Setup preconditioner
     HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
@@ -50,12 +50,11 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
      * Solves the system $\boldsymbol{M} \boldsymbol{r} = \boldsymbol{z}$ using Algebraic Multigrid
      */
     // Distribute RHS values to their corresponding processors
-    int num_rows = hypre_ParCSRMatrixGlobalNumRows(A_fem);
     int row_start = hypre_ParCSRMatrixFirstRowIndex(A_fem);
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = true;
+    bool mass_matrix_precond = false;
     bool mass_diagonal = false;
 
     HYPRE_IJVectorInitialize(f_bc);
@@ -126,6 +125,13 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     HYPRE_BoomerAMGSolve(amg_preconditioner, A_fem, f_fem, u_fem);
 
     double u_loc[num_loc_dofs];
+    int num_rows = row_end - row_start + 1;
+    double *visited = mem_alloc<double>(num_rows);
+
+    for (int row = 0; row < num_rows; row++)
+    {
+        visited[row] = 0.0;
+    }
 
     for (int i = 0; i < num_loc_dofs; i++)
     {
@@ -133,11 +139,20 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         if ((row_start <= row) and (row <= row_end))
         {
-            HYPRE_IJVectorGetValues(u_bc, 1, &row, &u_loc[i]);
+            if (visited[row - row_start] == 0.0)
+            {
+                HYPRE_IJVectorGetValues(u_bc, 1, &row, &u_loc[i]);
+
+                visited[row - row_start] = 1.0;
+            }
+            else
+            {
+                u_loc[i] = 0.0;
+            }
         }
         else
         {
-            u_loc[i] = - numeric_limits<double>::max();
+            u_loc[i] = 0.0;
         }
     }
 
