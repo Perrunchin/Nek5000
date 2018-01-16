@@ -96,11 +96,11 @@ void fem_matrices()
     long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
 
     // Assemble full FEM matrices without boundary conditions
-    long num_rows = (num_vert + (size - 1)) / size;
-    long idx_start = rank * num_rows;
-    long idx_end = (rank + 1) * num_rows - 1;
+    long num_rows = (num_vert + (num_proc - 1)) / num_proc;
+    long idx_start = proc_id * num_rows;
+    long idx_end = (proc_id + 1) * num_rows - 1;
 
-    if (rank == size - 1)
+    if (proc_id == num_proc - 1)
     {
         idx_end = num_vert - 1;
     }
@@ -352,14 +352,14 @@ void fem_matrices()
     long *compression = mem_alloc<long>(num_loc_dofs);
     long offset = 0;
 
-    if (rank < size - 1)
+    if (proc_id < num_proc - 1)
     {
-        MPI_Send(&num_loc_dofs, 1, MPI_LONG, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(&num_loc_dofs, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
     }
 
-    if (rank > 0)
+    if (proc_id > 0)
     {
-        MPI_Recv(&offset, 1, MPI_LONG, rank - 1, 0, MPI_COMM_WORLD, NULL);
+        MPI_Recv(&offset, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, NULL);
     }
 
     MPI_Scan(MPI_IN_PLACE, &offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
@@ -423,14 +423,14 @@ void fem_matrices()
         idx_end_bc = max(idx_end_bc, ranking[i]);
     }
 
-    if (rank < size - 1)
+    if (proc_id < num_proc - 1)
     {
-        MPI_Send(&idx_end_bc, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(&idx_end_bc, 1, MPI_INT, proc_id + 1, 0, MPI_COMM_WORLD);
     }
 
-    if (rank > 0)
+    if (proc_id > 0)
     {
-        MPI_Recv(&idx_start_bc, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, NULL);
+        MPI_Recv(&idx_start_bc, 1, MPI_INT, proc_id - 1, 0, MPI_COMM_WORLD, NULL);
 
         idx_start_bc += 1;
     }
