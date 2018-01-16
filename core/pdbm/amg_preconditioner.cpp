@@ -37,7 +37,7 @@ void set_amg_preconditioner_()
     HYPRE_BoomerAMGSetMaxCoarseSize(amg_preconditioner, 50); // maximum number of rows in coarse level
     HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation, 3 means SOR
     HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 1); // maximum number of V-cycles
+    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 100); // maximum number of V-cycles
     HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-7); // convergence tolerance
 
     // Setup preconditioner
@@ -54,8 +54,8 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = false;
-    bool mass_diagonal = false;
+    bool mass_matrix_precond = true;
+    bool mass_diagonal = true;
 
     HYPRE_IJVectorInitialize(f_bc);
 
@@ -174,4 +174,77 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         solution_vector[idx] = u_loc[i];
     }
+}
+
+// Memory management
+template<typename DataType>
+DataType* mem_alloc(int n)
+{
+    DataType *pointer = new DataType[n];
+
+    return pointer;
+}
+
+template<typename DataType>
+DataType** mem_alloc(int n, int m)
+{
+    DataType **pointer = new DataType*[n];
+
+    for (int i = 0; i < n; i++)
+    {
+        pointer[i] = new DataType[m];
+    }
+
+    return pointer;
+}
+
+template<typename DataType>
+DataType*** mem_alloc(int n, int m, int d)
+{
+    DataType ***pointer = new DataType**[n];
+
+    for (int i = 0; i < n; i++)
+    {
+        pointer[i] = new DataType*[m];
+
+        for (int j = 0; j < m; j++)
+        {
+            pointer[i][j] = new DataType[d];
+        }
+    }
+
+    return pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType *pointer, int n)
+{
+    delete[] pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType **pointer, int n, int m)
+{
+    for (int i = 0; i < n; i++)
+    {
+        delete[] pointer[i];
+    }
+
+    delete[] pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType ***pointer, int n, int m, int d)
+{
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < m; j++)
+        {
+            delete[] pointer[i][j];
+        }
+
+        delete[] pointer[i];
+    }
+
+    delete[] pointer;
 }

@@ -88,9 +88,9 @@ void fem_matrices()
      * Returns A_fem and B_fem
      */
     // MPI Information
-    int rank, size;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int proc_id, num_proc;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_proc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
 
     // Find the maximum vertex id which indicates the number of rows in the full FEM matrices
     long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
@@ -373,45 +373,43 @@ void fem_matrices()
 
     ranking = mem_alloc<long>(num_loc_dofs);
 
-//    long max_global = max(num_vert, (long)(num_loc_dofs));
+    parallel_ranking(ranking, compression, num_loc_dofs);
+
+//    // Gather data in one proc
+//    // TODO: Use parallel ranking
+//    int total_receive[size];
+//    int displs[size] = { 0 };
 //
-//    parallel_ranking(ranking, compression, num_loc_dofs, max_global);
-
-    // Gather data in one proc
-    // TODO: Use parallel ranking
-    int total_receive[size];
-    int displs[size] = { 0 };
-
-    MPI_Gather(&num_loc_dofs, 1, MPI_INT, total_receive, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    int total_count = total_receive[0];
-
-    for (int r = 1; r < size; r++)
-    {
-        displs[r] = displs[r - 1] + total_receive[r - 1];
-        total_count += total_receive[r];
-    }
-
-    long *array = NULL;
-    long *new_ranking = NULL;
-
-    if (rank == 0)
-    {
-        array = mem_alloc<long>(total_count);
-    }
-
-    MPI_Gatherv(compression, num_loc_dofs, MPI_LONG, array, total_receive, displs, MPI_LONG, 0, MPI_COMM_WORLD);
-
-    if (rank == 0)
-    {
-        new_ranking = mem_alloc<long>(total_count);
-        serial_ranking(new_ranking, array, total_count);
-    }
-
-    MPI_Scatterv(new_ranking, total_receive, displs, MPI_LONG, ranking, num_loc_dofs, MPI_LONG, 0, MPI_COMM_WORLD);
-
-    mem_free<long>(array, total_count);
-    // END TODO
+//    MPI_Gather(&num_loc_dofs, 1, MPI_INT, total_receive, 1, MPI_INT, 0, MPI_COMM_WORLD);
+//
+//    int total_count = total_receive[0];
+//
+//    for (int r = 1; r < size; r++)
+//    {
+//        displs[r] = displs[r - 1] + total_receive[r - 1];
+//        total_count += total_receive[r];
+//    }
+//
+//    long *array = NULL;
+//    long *new_ranking = NULL;
+//
+//    if (rank == 0)
+//    {
+//        array = mem_alloc<long>(total_count);
+//    }
+//
+//    MPI_Gatherv(compression, num_loc_dofs, MPI_LONG, array, total_receive, displs, MPI_LONG, 0, MPI_COMM_WORLD);
+//
+//    if (rank == 0)
+//    {
+//        new_ranking = mem_alloc<long>(total_count);
+//        serial_ranking(new_ranking, array, total_count);
+//    }
+//
+//    MPI_Scatterv(new_ranking, total_receive, displs, MPI_LONG, ranking, num_loc_dofs, MPI_LONG, 0, MPI_COMM_WORLD);
+//
+//    mem_free<long>(array, total_count);
+//    // END TODO
 
     // Number of unique vertices after boundary conditions are applied
     long num_vert_bc = maximum_value(ranking, num_loc_dofs) + 1;
@@ -582,31 +580,6 @@ void fem_matrices()
 
     HYPRE_IJVectorAssemble(Bd_bc);
     HYPRE_IJVectorGetObject(Bd_bc, (void**) &Bd_fem);
-
-//    // OUTPUT
-//    HYPRE_IJMatrixPrint(A_f, "A_f");
-//    HYPRE_IJMatrixPrint(A_bc, "A_bc");
-//    HYPRE_IJMatrixPrint(B_f, "B_f");
-//    HYPRE_IJMatrixPrint(B_bc, "B_bc");
-//
-//    if (rank == 0)
-//    {
-//        ofstream file;
-//        file.open("mapping.dat");
-//
-//        for (int i = 0; i < num_vert; i++)
-//        {
-//            if (glo_press_mask[i] > 0.0)
-//            {
-//                file << i << " " << glo_map[i] << endl;
-//            }
-//        }
-//
-//        file.close();
-//    }
-//
-//    HYPRE_IJVectorPrint(Bd_bc, "Bd_bc");
-//    // END OUTPUT
 
     // Free memory
     mem_free<double>(q_r, n_quad, n_dim);
@@ -901,71 +874,72 @@ void J_xr_map(double **&J_xr, double *r, double **x_t, int n_dim, vector<functio
     }
 }
 
-void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
+void parallel_ranking(long *&rank, long *array, int num_elem)
 {
-    int rank, size;
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int proc_id, num_proc;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_proc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
 
     // Define how many elements are to sent to each processor
-    int ids_count[size] = { 0 };
+    int max_global = maximum_value(array, num_elem);
+    int *elem_count = mem_alloc<int>(num_proc);
 
-    for (int i = 0; i < num_ids; i++)
+    for (int p = 0; p < num_proc; p++)
     {
-        if (ids[i] < max_global)
-        {
-            ids_count[ids[i] / ((max_global + (size - 1)) / size)]++;
-        }
+        elem_count[p] = 0;
+    }
+
+    for (int i = 0; i < num_elem; i++)
+    {
+        elem_count[array[i] / ((max_global + (num_proc - 1)) / num_proc)]++;
     }
 
     // Notify each processor of how many items they will receive
-    int receive_count[size];
+    int receive_count[num_proc];
     int total_receive = 0;
 
-    MPI_Alltoall(ids_count, 1, MPI_INT, receive_count, 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Alltoall(elem_count, 1, MPI_INT, receive_count, 1, MPI_INT, MPI_COMM_WORLD);
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
         total_receive += receive_count[p];
     }
 
     // Create matrix with values corresponding to each processor
-    long **ranking_values = new long*[size];
-    int values_count[size] = { 0 };
-    int **values_position = new int*[size];
+    long **ranking_values = new long*[num_proc];
+    int *values_count = mem_alloc<int>(num_proc);
+    int **values_position = new int*[num_proc];
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
-        ranking_values[p] = new long[ids_count[p]];
-        values_position[p] = new int[ids_count[p]];
+        ranking_values[p] = new long[elem_count[p]];
+        values_count[p] = 0;
+        values_position[p] = new int[elem_count[p]];
     }
 
-    for (int i = 0; i < num_ids; i++)
+    for (int i = 0; i < num_elem; i++)
     {
-        if (ids[i] < max_global)
-        {
-            int p = ids[i] / ((max_global + (size - 1)) / size);
+        int p = array[i] / ((max_global + (num_proc - 1)) / num_proc);
 
-            ranking_values[p][values_count[p]] = ids[i];
-            values_position[p][values_count[p]] = i;
-            values_count[p]++;
-        }
+        ranking_values[p][values_count[p]] = array[i];
+        values_position[p][values_count[p]] = i;
+        values_count[p]++;
     }
 
     // Map matrix of values of processors into 1D array
     int total_values = 0;
     int idx = 0;
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
-        total_values += ids_count[p];
+        total_values += elem_count[p];
     }
 
-    long message_values[total_values];
+    long *message_values = mem_alloc<long>(total_values);
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
-        for (int i = 0; i < ids_count[p]; i++)
+        for (int i = 0; i < elem_count[p]; i++)
         {
             message_values[idx] = ranking_values[p][i];
             idx++;
@@ -973,112 +947,55 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
     }
 
     // Comput offsets
-    int message_offsets[size] = { 0 };
+    int *message_offsets = mem_alloc<int>(num_proc);
     int offset = 0;
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
         message_offsets[p] = offset;
-        offset += ids_count[p];
+        offset += elem_count[p];
     }
 
-    long bucket_values[total_receive];
-    int receive_offsets[size] = { 0 };
+    long *bucket_values = mem_alloc<long>(total_receive);
+    int *receive_offsets = mem_alloc<int>(num_proc);
     offset = 0;
 
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
         receive_offsets[p] = offset;
         offset += receive_count[p];
     }
 
     // Send values to each processor to perform local rankings
-    MPI_Alltoallv(message_values, ids_count, message_offsets, MPI_LONG, bucket_values, receive_count, receive_offsets, MPI_LONG, MPI_COMM_WORLD);
+    MPI_Alltoallv(message_values, elem_count, message_offsets, MPI_LONG, bucket_values, receive_count, receive_offsets, MPI_LONG, MPI_COMM_WORLD);
 
-    // Perform local sorting
-    vector<VertexID> local_data(total_receive);
+    // Perform local ranking
+    long *rank_loc = mem_alloc<long>(total_receive);
+
+    serial_ranking(rank_loc, bucket_values, total_receive);
+
+    // Update ranking accross processors
+    long max_loc = *max_element(rank_loc, rank_loc + total_receive) + 1;
+    long ranking_offset;
+
+    MPI_Scan(&max_loc, &ranking_offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
+
+    ranking_offset -= max_loc;
 
     for (int i = 0; i < total_receive; i++)
     {
-        local_data[i].key = i;
-        local_data[i].value = bucket_values[i];
+        rank_loc[i] += ranking_offset;
     }
 
-    // Sort with respect to value
-    sort(local_data.begin(), local_data.end(), [] (const VertexID &i, const VertexID &j) { return i.value < j.value; });
-
-    // Set local ranking
-    long ranking_value = 1;
-    local_data[0].ranking = 0;
-
-    for (int i = 1; i < total_receive; i++)
-    {
-        if (local_data[i].value == local_data[i - 1].value)
-        {
-            local_data[i].ranking = ranking_value - 1;
-        }
-        else
-        {
-            local_data[i].ranking = ranking_value;
-            ranking_value++;
-        }
-    }
-
-    // Share neighbor values to update ranking in each processor
-    long left_value;
-
-    if (rank < size - 1)
-    {
-        MPI_Send(&local_data[total_receive - 1].value, 1, MPI_LONG, rank + 1, 0, MPI_COMM_WORLD);
-    }
-
-    if (rank > 0)
-    {
-        MPI_Recv(&left_value, 1, MPI_LONG, rank - 1, 0, MPI_COMM_WORLD, NULL);
-    }
-
-    // Perform scan to get rank offsets
-    int ranking_offset = 0;
-    long last_ranking = local_data[total_receive - 1].ranking;
-
-    if ((rank > 0) && (left_value != local_data[0].value))
-    {
-        last_ranking++;
-    }
-
-    MPI_Scan(&last_ranking, &ranking_offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
-    ranking_offset -= local_data[total_receive - 1].ranking;
-
-    if (rank > 0)
-    {
-        for (int i = 0; i < total_receive; i++)
-        {
-            local_data[i].ranking += ranking_offset;
-        }
-    }
-
-    // Sort with respect to key to get everything back in place
-    sort(local_data.begin(), local_data.end(), [] (const VertexID &i, const VertexID &j) { return i.key < j.key; });
-
-    // Send data to the corresponding processors
-    for (int i = 0; i < total_receive; i++)
-    {
-        bucket_values[i] = local_data[i].ranking;
-    }
-
-    MPI_Alltoallv(bucket_values, receive_count, receive_offsets, MPI_LONG, message_values, ids_count, message_offsets, MPI_LONG, MPI_COMM_WORLD);
+    // Put everything back in place
+    MPI_Alltoallv(rank_loc, receive_count, receive_offsets, MPI_LONG, message_values, elem_count, message_offsets, MPI_LONG, MPI_COMM_WORLD);
 
     // Reorganize data in original form
     idx = 0;
 
-    for (int i = 0; i < num_ids; i++)
+    for (int p = 0; p < num_proc; p++)
     {
-        ranking[i] = -1;
-    }
-
-    for (int p = 0; p < size; p++)
-    {
-        for (int i = 0; i < ids_count[p]; i++)
+        for (int i = 0; i < elem_count[p]; i++)
         {
             ranking[values_position[p][i]] = message_values[idx];
             idx++;
@@ -1086,7 +1003,7 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
     }
 
     // Free memory
-    for (int p = 0; p < size; p++)
+    for (int p = 0; p < num_proc; p++)
     {
         delete[] ranking_values[p];
         delete[] values_position[p];
@@ -1094,6 +1011,14 @@ void parallel_ranking(long *&ranking, long *ids, int num_ids, long max_global)
 
     delete[] ranking_values;
     delete[] values_position;
+
+    mem_free<int>(elem_count, num_proc);
+    mem_free<int>(values_count, num_proc);
+    mem_free<long>(message_values, total_values);
+    mem_free<int>(message_offsets, num_proc);
+    mem_free<long>(bucket_values, total_receive);
+    mem_free<int>(receive_offsets, num_proc);
+    mem_free<long>(rank_loc, total_receive);
 }
 
 void serial_ranking(long *ranking, long *array, int num_elems)

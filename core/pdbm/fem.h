@@ -53,7 +53,7 @@ void quadrature_rule(double**&, double*&, int, int);
 void mesh_connectivity(int**&, int**&, int, int);
 void x_map(double*&, double*, double**, int, vector<function<double (double*)>>);
 void J_xr_map(double**&, double*, double**, int, vector<function<void (double*, double*)>>);
-void parallel_ranking(long*&, long*, int, long);
+void parallel_ranking(long*&, long*, int);
 void serial_ranking(long*, long*, int);
 
 // Math functions
