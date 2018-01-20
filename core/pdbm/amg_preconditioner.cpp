@@ -102,7 +102,7 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     }
 
     // Solve preconditioning linear system
-    amg_preconditioner->solve(u_fem_rap, f_fem_rap, NULL, 1);
+    amg_preconditioner->solve(u_fem_rap, f_fem_rap, NULL, 100);
 //    amg_preconditioner->set_res_tol(1.0e-7);
 //    amg_preconditioner->solve(u_fem_rap, f_fem_rap);
 
@@ -156,4 +156,79 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         solution_vector[idx] = u_loc[i];
     }
+
+    mem_free<double>(visited, num_rows);
+}
+
+// Memory management
+template<typename DataType>
+DataType* mem_alloc(int n)
+{
+    DataType *pointer = new DataType[n];
+
+    return pointer;
+}
+
+template<typename DataType>
+DataType** mem_alloc(int n, int m)
+{
+    DataType **pointer = new DataType*[n];
+
+    for (int i = 0; i < n; i++)
+    {
+        pointer[i] = new DataType[m];
+    }
+
+    return pointer;
+}
+
+template<typename DataType>
+DataType*** mem_alloc(int n, int m, int d)
+{
+    DataType ***pointer = new DataType**[n];
+
+    for (int i = 0; i < n; i++)
+    {
+        pointer[i] = new DataType*[m];
+
+        for (int j = 0; j < m; j++)
+        {
+            pointer[i][j] = new DataType[d];
+        }
+    }
+
+    return pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType *pointer, int n)
+{
+    delete[] pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType **pointer, int n, int m)
+{
+    for (int i = 0; i < n; i++)
+    {
+        delete[] pointer[i];
+    }
+
+    delete[] pointer;
+}
+
+template<typename DataType>
+void mem_free(DataType ***pointer, int n, int m, int d)
+{
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < m; j++)
+        {
+            delete[] pointer[i][j];
+        }
+
+        delete[] pointer[i];
+    }
+
+    delete[] pointer;
 }
