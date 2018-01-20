@@ -193,10 +193,12 @@ void fem_matrices()
                         s[2] = s_z;
                     }
 
-                    int idx[int(pow(2, n_dim))] = { 0 };
+                    int idx[int(pow(2, n_dim))];
 
                     for (int i = 0; i < pow(2, n_dim); i++)
                     {
+                        idx[i] = 0;
+
                         for (int d = 0; d < n_dim; d++)
                         {
                             idx[i] += (s[d] + v_coord[i][d]) * pow(n_x, d);
@@ -354,12 +356,14 @@ void fem_matrices()
 
     if (proc_id < num_proc - 1)
     {
-        MPI_Send(&num_loc_dofs, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
+        long num_loc_dofs_long = (long)(num_loc_dofs);
+
+        MPI_Send(&num_loc_dofs_long, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
     }
 
     if (proc_id > 0)
     {
-        MPI_Recv(&offset, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, NULL);
+        MPI_Recv(&offset, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
     MPI_Scan(MPI_IN_PLACE, &offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
@@ -375,42 +379,6 @@ void fem_matrices()
 
     parallel_ranking(ranking, compression, num_loc_dofs);
 
-//    // Gather data in one proc
-//    // TODO: Use parallel ranking
-//    int total_receive[size];
-//    int displs[size] = { 0 };
-//
-//    MPI_Gather(&num_loc_dofs, 1, MPI_INT, total_receive, 1, MPI_INT, 0, MPI_COMM_WORLD);
-//
-//    int total_count = total_receive[0];
-//
-//    for (int r = 1; r < size; r++)
-//    {
-//        displs[r] = displs[r - 1] + total_receive[r - 1];
-//        total_count += total_receive[r];
-//    }
-//
-//    long *array = NULL;
-//    long *new_ranking = NULL;
-//
-//    if (rank == 0)
-//    {
-//        array = mem_alloc<long>(total_count);
-//    }
-//
-//    MPI_Gatherv(compression, num_loc_dofs, MPI_LONG, array, total_receive, displs, MPI_LONG, 0, MPI_COMM_WORLD);
-//
-//    if (rank == 0)
-//    {
-//        new_ranking = mem_alloc<long>(total_count);
-//        serial_ranking(new_ranking, array, total_count);
-//    }
-//
-//    MPI_Scatterv(new_ranking, total_receive, displs, MPI_LONG, ranking, num_loc_dofs, MPI_LONG, 0, MPI_COMM_WORLD);
-//
-//    mem_free<long>(array, total_count);
-//    // END TODO
-
     // Number of unique vertices after boundary conditions are applied
     long num_vert_bc = maximum_value(ranking, num_loc_dofs) + 1;
     long scan_offset;
@@ -425,12 +393,12 @@ void fem_matrices()
 
     if (proc_id < num_proc - 1)
     {
-        MPI_Send(&idx_end_bc, 1, MPI_INT, proc_id + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(&idx_end_bc, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
     }
 
     if (proc_id > 0)
     {
-        MPI_Recv(&idx_start_bc, 1, MPI_INT, proc_id - 1, 0, MPI_COMM_WORLD, NULL);
+        MPI_Recv(&idx_start_bc, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         idx_start_bc += 1;
     }
@@ -656,46 +624,6 @@ void set_sem_inverse_mass_matrix_(double* inv_B)
 
     HYPRE_IJVectorAssemble(Binv_sem_bc);
     HYPRE_IJVectorDestroy(total_count);
-
-//    // OUTPUT
-//    long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
-//    double Binv[num_vert];
-//
-//    for (int i = 0; i < num_vert; i++)
-//    {
-//        Binv[i] = 0.0;
-//    }
-//
-//    for (int e = 0; e < n_elem; e++)
-//    {
-//        for (int i = 0; i < n_x * n_y * n_z; i++)
-//        {
-//            int idx = i + e * (n_x * n_y * n_z);
-//
-//            Binv[glo_num[e][i]] = inv_B[idx];
-//        }
-//    }
-//
-//    MPI_Allreduce(MPI_IN_PLACE, &Binv, num_vert, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-//
-//    int rank;
-//    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-//
-//    if (rank == 0)
-//    {
-//        ofstream file;
-//        file.open("Binv_sem.dat");
-//
-//        for (int i = 0; i < num_vert; i++)
-//        {
-//            file << fixed << setprecision(16) << Binv[i] << endl;
-//        }
-//
-//        file.close();
-//    }
-//
-//    HYPRE_IJVectorPrint(Binv_sem_bc, "Binv_sem_bc");
-//    // END OUTPUT
 }
 
 void quadrature_rule(double **&q_r, double *&q_w, int n_quad, int n_dim)

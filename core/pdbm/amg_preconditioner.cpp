@@ -174,6 +174,8 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
 
         solution_vector[idx] = u_loc[i];
     }
+
+    mem_free<double>(visited, num_rows);
 }
 
 // Memory management
