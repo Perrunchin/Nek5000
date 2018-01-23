@@ -42,14 +42,6 @@ HYPRE_ParVector Bd_fem;
 HYPRE_IJVector Binv_sem_bc;
 HYPRE_ParVector Binv_sem;
 
-// Structures
-struct VertexID
-{
-    int key;
-    long value;
-    long ranking;
-};
-
 // Functions definition
 void assemble_fem_matrices_()
 {
@@ -429,9 +421,14 @@ void fem_matrices()
 
     distribute_data_(Bd_gs, num_loc_dofs);
 
-    for (int i = idx_start_bc; i <= idx_end_bc; i++)
+    for (int i = 0; i < num_loc_dofs; i++)
     {
-        HYPRE_IJVectorSetValues(Bd_bc, 1, &i, &Bd_gs[i - idx_start_bc]);
+        int row = ranking[i];
+
+        if ((idx_start_bc <= row) and (row <= idx_end_bc))
+        {
+            HYPRE_IJVectorSetValues(Bd_bc, 1, &row, &Bd_gs[i]);
+        }
     }
 
     HYPRE_IJMatrixAssemble(A_bc);

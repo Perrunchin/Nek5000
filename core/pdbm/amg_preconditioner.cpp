@@ -54,8 +54,8 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     int row_end = hypre_ParCSRMatrixLastRowIndex(A_fem);
 
     // Prepare RHS after distribution
-    bool mass_matrix_precond = true;
-    bool mass_diagonal = true;
+    bool mass_matrix_precond = false;
+    bool mass_diagonal = false;
 
     HYPRE_IJVectorInitialize(f_bc);
 
