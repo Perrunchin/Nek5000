@@ -49,14 +49,6 @@ HYPRE_ParVector Bd_fem;
 HYPRE_IJVector Binv_sem_bc;
 HYPRE_ParVector Binv_sem;
 
-// Structures
-struct VertexID
-{
-    int key;
-    long value;
-    long ranking;
-};
-
 // Functions definition
 void assemble_fem_matrices_()
 {
@@ -141,30 +133,128 @@ void fem_matrices()
     MPI_Comm_size(MPI_COMM_WORLD, &num_proc);
     MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
 
-    // Find the maximum vertex id which indicates the number of rows in the full FEM matrices
-    long num_vert = maximum_value(glo_num, n_elem, n_x * n_y * n_z) + 1;
+    // Rank vertices after boundary conditions are removed
+    num_loc_dofs = 0;
 
-    // Assemble full FEM matrices without boundary conditions
-    long num_rows = (num_vert + (num_proc - 1)) / num_proc;
-    long idx_start = proc_id * num_rows;
-    long idx_end = (proc_id + 1) * num_rows - 1;
-
-    if (proc_id == num_proc - 1)
+    for (int e = 0; e < n_elem; e++)
     {
-        idx_end = num_vert - 1;
+        for (int i = 0; i < n_x * n_y * n_z; i++)
+        {
+            if (press_mask[e][i] > 0.0)
+            {
+                num_loc_dofs++;
+            }
+        }
     }
 
-    num_rows = (idx_end + 1) - idx_start;
+    dof_map = mem_alloc<long>(3, num_loc_dofs);
+    int **ranking_map = mem_alloc<int>(n_elem, n_x * n_y * n_z);
+    int idx = 0;
 
-    HYPRE_IJMatrix A_f;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start, idx_end, idx_start, idx_end, &A_f);
-    HYPRE_IJMatrixSetObjectType(A_f, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(A_f);
+    for (int e = 0; e < n_elem; e++)
+    {
+        for (int i = 0; i < n_x * n_y * n_z; i++)
+        {
+            if (press_mask[e][i] > 0.0)
+            {
+                dof_map[0][idx] = i;
+                dof_map[1][idx] = e;
+                dof_map[2][idx] = glo_num[e][i];
+                ranking_map[e][i] = idx;
+                idx++;
+            }
+            else
+            {
+                ranking_map[e][i] = -1;
+            }
+        }
+    }
 
-    HYPRE_IJMatrix B_f;
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start, idx_end, idx_start, idx_end, &B_f);
-    HYPRE_IJMatrixSetObjectType(B_f, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_f);
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        dof_map[2][i] += 1;
+    }
+
+    set_amg_gs_handle_(dof_map[2], num_loc_dofs);
+
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        dof_map[2][i] -= 1;
+    }
+
+    long *compression = mem_alloc<long>(num_loc_dofs);
+    long offset = 0;
+
+    if (proc_id < num_proc - 1)
+    {
+        long num_loc_dofs_long = (long)(num_loc_dofs);
+
+        MPI_Send(&num_loc_dofs_long, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (proc_id > 0)
+    {
+        MPI_Recv(&offset, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    MPI_Scan(MPI_IN_PLACE, &offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
+
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        compression[i] = offset + i;
+    }
+
+    compress_data_(compression, num_loc_dofs);
+
+    ranking = mem_alloc<long>(num_loc_dofs);
+
+    parallel_ranking(ranking, compression, num_loc_dofs);
+
+    // Number of unique vertices after boundary conditions are applied
+    long num_vert_bc = maximum_value(ranking, num_loc_dofs) + 1;
+    long scan_offset;
+
+    long idx_start_bc = 0;
+    long idx_end_bc = 0;
+
+    for (int i = 0; i < num_loc_dofs; i++)
+    {
+        idx_end_bc = max(idx_end_bc, ranking[i]);
+    }
+
+    if (proc_id < num_proc - 1)
+    {
+        MPI_Send(&idx_end_bc, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
+    }
+
+    if (proc_id > 0)
+    {
+        MPI_Recv(&idx_start_bc, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        idx_start_bc += 1;
+    }
+
+    // Assemble FE matrices with boundaries removed
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &A_bc);
+    HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(A_bc);
+
+    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &B_bc);
+    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
+    HYPRE_IJMatrixInitialize(B_bc);
+
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, &Bd_bc);
+    HYPRE_IJVectorSetObjectType(Bd_bc, HYPRE_PARCSR);
+    HYPRE_IJVectorInitialize(Bd_bc);
+
+    // Find the maximum vertex id which indicates the number of rows in the full FEM matrices
+    // Needed for the diagonal mass matrix
+    double *Bd_sum = mem_alloc<double>(n_elem * n_x * n_y * n_z);
+
+    for (int i = 0; i < n_elem * n_x * n_y * n_z; i++)
+    {
+        Bd_sum[i] = 0.0;
+    }
 
     // Set quadrature rule
     int n_quad = (n_dim == 2) ? 3 : 4;
@@ -322,30 +412,38 @@ void fem_matrices()
                         {
                             for (int j = 0; j < n_dim + 1; j++)
                             {
-                                int row = glo_num[e][idx[t_map[t][i]]];
-                                int col = glo_num[e][idx[t_map[t][j]]];
-
-                                double A_val = A_loc[i][j];
-                                double B_val = B_loc[i][j];
-
-                                int ncols = 1;
-                                int insert_error;
-
-                                if (std::abs(A_val) > 1.0e-14)
+                                if ((press_mask[e][idx[t_map[t][i]]] > 0.0) and (press_mask[e][idx[t_map[t][j]]] > 0.0))
                                 {
-                                    insert_error = HYPRE_IJMatrixAddToValues(A_f, 1, &ncols, &row, &col, &A_val);
+                                    int row = ranking[ranking_map[e][idx[t_map[t][i]]]];
+                                    int col = ranking[ranking_map[e][idx[t_map[t][j]]]];
+
+                                    double A_val = A_loc[i][j];
+                                    double B_val = B_loc[i][j];
+
+                                    int ncols = 1;
+                                    int insert_error;
+
+                                    if (std::abs(A_val) > 1.0e-14)
+                                    {
+                                        insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &ncols, &row, &col, &A_val);
+                                    }
+
+                                    if (std::abs(B_val) > 1.0e-14)
+                                    {
+                                        insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &ncols, &row, &col, &B_val);
+                                    }
+
+                                    if (insert_error != 0)
+                                    {
+                                        printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
+                                        exit(EXIT_FAILURE);
+                                    }
                                 }
 
-                                if (std::abs(B_val) > 1.0e-14)
-                                {
-                                    insert_error = HYPRE_IJMatrixAddToValues(B_f, 1, &ncols, &row, &col, &B_val);
-                                }
-
-                                if (insert_error != 0)
-                                {
-                                    printf("There was an error with entry A(%d, %d) = %f or B(%d, %d) = %f\n", row, col, A_val, row, col, B_val);
-                                    exit(EXIT_FAILURE);
-                                }
+                                int row = idx[t_map[t][i]] + e * (n_x * n_y * n_z);
+                                int col = idx[t_map[t][j]] + e * (n_x * n_y * n_z);
+                                Bd_sum[row] += B_loc[i][j];
+                                Bd_sum[col] += B_loc[i][j];
                             }
                         }
                     }
@@ -354,203 +452,31 @@ void fem_matrices()
         }
     }
 
-    HYPRE_IJMatrixAssemble(A_f);
-    HYPRE_IJMatrixAssemble(B_f);
-
-    // Rank vertices after boundary conditions are removed
-    num_loc_dofs = 0;
+    double *Bd_gs = mem_alloc<double>(num_loc_dofs);
 
     for (int e = 0; e < n_elem; e++)
     {
         for (int i = 0; i < n_x * n_y * n_z; i++)
         {
-            if (press_mask[e][i] > 0.0)
+            int idx = i + e * (n_x * n_y * n_z);
+            int map = ranking_map[e][i];
+
+            if (map > - 1)
             {
-                num_loc_dofs++;
+                Bd_gs[map] = Bd_sum[idx] / 2.0;
             }
         }
     }
 
-    dof_map = mem_alloc<long>(3, num_loc_dofs);
-    int idx = 0;
+    distribute_data_(Bd_gs, num_loc_dofs);
 
-    for (int e = 0; e < n_elem; e++)
+    for (int i = 0; i < num_loc_dofs; i++)
     {
-        for (int i = 0; i < n_x * n_y * n_z; i++)
+        int row = ranking[i];
+
+        if ((idx_start_bc <= row) and (row <= idx_end_bc))
         {
-            if (press_mask[e][i] > 0.0)
-            {
-                dof_map[0][idx] = i;
-                dof_map[1][idx] = e;
-                dof_map[2][idx] = glo_num[e][i];
-                idx++;
-            }
-        }
-    }
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        dof_map[2][i] += 1;
-    }
-
-    set_amg_gs_handle_(dof_map[2], num_loc_dofs);
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        dof_map[2][i] -= 1;
-    }
-
-    long *compression = mem_alloc<long>(num_loc_dofs);
-    long offset = 0;
-
-    if (proc_id < num_proc - 1)
-    {
-        long num_loc_dofs_long = (long)(num_loc_dofs);
-
-        MPI_Send(&num_loc_dofs_long, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
-    }
-
-    if (proc_id > 0)
-    {
-        MPI_Recv(&offset, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-
-    MPI_Scan(MPI_IN_PLACE, &offset, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        compression[i] = offset + i;
-    }
-
-    compress_data_(compression, num_loc_dofs);
-
-    ranking = mem_alloc<long>(num_loc_dofs);
-
-    parallel_ranking(ranking, compression, num_loc_dofs);
-
-    // Number of unique vertices after boundary conditions are applied
-    long num_vert_bc = maximum_value(ranking, num_loc_dofs) + 1;
-    long scan_offset;
-
-    long idx_start_bc = 0;
-    long idx_end_bc = 0;
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        idx_end_bc = max(idx_end_bc, ranking[i]);
-    }
-
-    if (proc_id < num_proc - 1)
-    {
-        MPI_Send(&idx_end_bc, 1, MPI_LONG, proc_id + 1, 0, MPI_COMM_WORLD);
-    }
-
-    if (proc_id > 0)
-    {
-        MPI_Recv(&idx_start_bc, 1, MPI_LONG, proc_id - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        idx_start_bc += 1;
-    }
-
-    // Assemble FE matrices with boundaries removed
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &A_bc);
-    HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(A_bc);
-
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &B_bc);
-    HYPRE_IJMatrixSetObjectType(B_bc, HYPRE_PARCSR);
-    HYPRE_IJMatrixInitialize(B_bc);
-
-    HYPRE_ParCSRMatrix A_f_csr;
-    HYPRE_ParCSRMatrix B_f_csr;
-    HYPRE_IJMatrixGetObject(A_f, (void**) &A_f_csr);
-    HYPRE_IJMatrixGetObject(B_f, (void**) &B_f_csr);
-
-    // TODO: Notify everyone of what rows are to be removed
-    long *glo_map = mem_alloc<long>(num_vert);
-
-    for (int i = 0; i < num_vert; i++)
-    {
-        glo_map[i] = -1;
-    }
-
-    for (int i = 0; i < num_loc_dofs; i++)
-    {
-        glo_map[dof_map[2][i]] = ranking[i];
-    }
-
-    MPI_Allreduce(MPI_IN_PLACE, glo_map, num_vert, MPI_LONG, MPI_MAX, MPI_COMM_WORLD);
-
-    double *glo_press_mask = mem_alloc<double>(num_vert);
-
-    for (int i = 0; i < num_vert; i++)
-    {
-        glo_press_mask[i] = -1.0;
-    }
-
-    for (int e = 0; e < n_elem; e++)
-    {
-        for (int i = 0; i < n_x * n_y * n_z; i++)
-        {
-            glo_press_mask[glo_num[e][i]] = press_mask[e][i];
-        }
-    }
-
-    MPI_Allreduce(MPI_IN_PLACE, glo_press_mask, num_vert, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-    // END TODO:
-
-    // Remove rows and move remaining rows to respective position
-    for (int i = idx_start; i <= idx_end; i++)
-    {
-        if (glo_press_mask[i] > 0.0)
-        {
-            // Find where this row goes
-            int row = glo_map[i];
-
-            // Add values
-            int n_cols;
-            int* cols;
-            double* values;
-
-            HYPRE_ParCSRMatrixGetRow(A_f_csr, i, &n_cols, &cols, &values);
-
-            for (int j = 0; j < n_cols; j++)
-            {
-                if (glo_press_mask[cols[j]] > 0.0)
-                {
-                    int col = glo_map[cols[j]];
-                    int num_cols = 1;
-                    int insert_error = HYPRE_IJMatrixAddToValues(A_bc, 1, &num_cols, &row, &col, values + j);
-
-                    if (insert_error != 0)
-                    {
-                        printf("There was an error with entry A_fem(%d, %d) = %f\n", row, col, values[j]);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-            }
-
-            HYPRE_ParCSRMatrixRestoreRow(A_f_csr, i, &n_cols, &cols, &values);
-
-            HYPRE_ParCSRMatrixGetRow(B_f_csr, i, &n_cols, &cols, &values);
-
-            for (int j = 0; j < n_cols; j++)
-            {
-                if (glo_press_mask[cols[j]] > 0.0)
-                {
-                    int col = glo_map[cols[j]];
-                    int num_cols = 1;
-                    int insert_error = HYPRE_IJMatrixAddToValues(B_bc, 1, &num_cols, &row, &col, values + j);
-
-                    if (insert_error != 0)
-                    {
-                        printf("There was an error with entry B_fem(%d, %d) = %f\n", row, col, values[j]);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-            }
-
-            HYPRE_ParCSRMatrixRestoreRow(B_f_csr, i, &n_cols, &cols, &values);
+            HYPRE_IJVectorSetValues(Bd_bc, 1, &row, &Bd_gs[i]);
         }
     }
 
@@ -559,41 +485,6 @@ void fem_matrices()
 
     HYPRE_IJMatrixAssemble(B_bc);
     HYPRE_IJMatrixGetObject(B_bc, (void**) &B_fem);
-
-    // Build diagonal mass matrix with full mass matrix without boundary conditions
-    double *Bd_sum = mem_alloc<double>(num_rows);
-
-    for (int i = idx_start; i <= idx_end; i++)
-    {
-        int n_cols;
-        int* cols;
-        double* values;
-
-        HYPRE_ParCSRMatrixGetRow(B_f_csr, i, &n_cols, &cols, &values);
-
-        Bd_sum[i - idx_start] = 0.0;
-
-        for (int j = 0; j < n_cols; j++)
-        {
-            Bd_sum[i - idx_start] += values[j];
-        }
-
-        HYPRE_ParCSRMatrixRestoreRow(B_f_csr, i, &n_cols, &cols, &values);
-    }
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, &Bd_bc);
-    HYPRE_IJVectorSetObjectType(Bd_bc, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(Bd_bc);
-
-    for (int i = idx_start; i <= idx_end; i++)
-    {
-        int row = glo_map[i];
-
-        if (glo_press_mask[i] > 0.0)
-        {
-            HYPRE_IJVectorAddToValues(Bd_bc, 1, &row, &Bd_sum[i - idx_start]);
-        }
-    }
 
     HYPRE_IJVectorAssemble(Bd_bc);
     HYPRE_IJVectorGetObject(Bd_bc, (void**) &Bd_fem);
@@ -610,11 +501,9 @@ void fem_matrices()
     mem_free<double>(x_t, n_dim, n_dim);
     mem_free<double>(q_x, n_dim);
     mem_free<long>(compression, num_loc_dofs);
-    mem_free<long>(glo_map, num_vert);
-    mem_free<double>(glo_press_mask, num_vert);
-    mem_free<double>(Bd_sum, num_rows);
-    HYPRE_IJMatrixDestroy(A_f);
-    HYPRE_IJMatrixDestroy(B_f);
+    mem_free<int>(ranking_map, n_elem, n_x * n_y * n_z);
+    mem_free<double>(Bd_sum, n_elem * n_x * n_y * n_z);
+    mem_free<double>(Bd_gs, num_loc_dofs);
 }
 
 void set_sem_inverse_mass_matrix_(double* inv_B)
