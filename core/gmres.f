@@ -434,7 +434,9 @@ c           if (outer.gt.2) if_hyb = .true.       ! Slow outer convergence
                call add2         (z_gmres(1,j),wk,n) !  j        
             endif
 
-            write(*, *) "Prec Time: ", dnekclock() - etime2
+            if (nio .eq. 0) then
+               write(*, *) "Prec Time: ", dnekclock() - etime2
+            endif
 
             call ortho        (z_gmres(1,j)) ! Orthogonalize wrt null space, if present
             etime_p = etime_p + dnekclock()-etime2

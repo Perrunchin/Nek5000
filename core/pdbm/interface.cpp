@@ -32,9 +32,12 @@ void enable_mpi_output_()
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    string name;
-    name = "out_" + to_string(rank) + ".dat";
-    freopen(name.c_str(), "w", stdout);
+    if (rank == 0)
+    {
+        string name;
+        name = "out_" + to_string(rank) + ".dat";
+        freopen(name.c_str(), "w", stdout);
+    }
 }
 
 void set_element_data_(int &n_x_, int &n_y_, int &n_z_, int &n_elem_, int &n_dim_)

@@ -19,4 +19,23 @@ extern "C"
     void mass_matrix_preconditioning_(double*);
 }
 
+// Memory management
+template<typename DataType>
+DataType* mem_alloc(int);
+
+template<typename DataType>
+DataType** mem_alloc(int, int);
+
+template<typename DataType>
+DataType*** mem_alloc(int, int, int);
+
+template<typename DataType>
+void mem_free(DataType*, int);
+
+template<typename DataType>
+void mem_free(DataType**, int, int);
+
+template<typename DataType>
+void mem_free(DataType***, int, int, int);
+
 #endif
