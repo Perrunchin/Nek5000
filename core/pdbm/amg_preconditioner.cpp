@@ -34,7 +34,56 @@ void set_amg_preconditioner_()
     // Create solver
     double strong_threshold = 0.25;
 
-    amg_preconditioner = new ParMultilevel(A_fem_rap, strong_threshold, CLJP, Classical, SOR);
+    amg_preconditioner = new ParMultilevel(A_fem_rap, strong_threshold, HMIS, Extended, SOR, 1, 1.0, 50, -1, 3);
+
+    // Output AMG structure
+    int proc_id;
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
+
+    if (proc_id == 0)
+    {
+        printf("\nRaptor AMG Structure:\n");
+        printf("Num Levels = %d\n", amg_preconditioner->num_levels);
+        printf("A\tNRow\tNCol\tNNZ\n");
+    }
+
+    for (int i = 0; i < amg_preconditioner->num_levels; i++)
+    {
+        ParCSRMatrix* A_loc = amg_preconditioner->levels[i]->A;
+        long local_nnz = A_loc->local_nnz;
+        long nnz;
+
+        MPI_Reduce(&local_nnz, &nnz, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+
+        if (proc_id == 0)
+        {
+            printf("%d\t%d\t%d\t%lu\n", i, A_loc->global_num_rows, A_loc->global_num_cols, nnz);
+        }
+    }
+
+    if (proc_id == 0)
+    {
+        printf("\nP\tNRow\tNCol\tNNZ\n");
+    }
+
+    for (int i = 0; i < amg_preconditioner->num_levels - 1; i++)
+    {
+        ParCSRMatrix* P_loc = amg_preconditioner->levels[i]->P;
+        long local_nnz = P_loc->local_nnz;
+        long nnz;
+
+        MPI_Reduce(&local_nnz, &nnz, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+
+        if (proc_id == 0)
+        {
+            printf("%d\t%d\t%d\t%lu\n", i, P_loc->global_num_rows, P_loc->global_num_cols, nnz);
+        }
+    }
+
+    if (proc_id == 0)
+    {
+        printf("\n");
+    }
 }
 
 void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_vector)
@@ -102,9 +151,7 @@ void amg_fem_preconditioner_(double *solution_vector, double *right_hand_side_ve
     }
 
     // Solve preconditioning linear system
-    amg_preconditioner->solve(u_fem_rap, f_fem_rap, NULL, 100);
-//    amg_preconditioner->set_res_tol(1.0e-7);
-//    amg_preconditioner->solve(u_fem_rap, f_fem_rap);
+    amg_preconditioner->tap_solve(u_fem_rap, f_fem_rap, NULL, 3, 1);
 
     double u_loc[num_loc_dofs];
     int num_rows = row_end - row_start + 1;

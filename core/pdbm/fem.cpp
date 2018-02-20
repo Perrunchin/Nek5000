@@ -234,6 +234,26 @@ void fem_matrices()
         idx_start_bc += 1;
     }
 
+    // Output row distribution
+    long num_loc_rows = idx_end_bc - idx_start_bc + 1;
+    long *proc_rows = mem_alloc<long>(num_proc);
+
+    MPI_Gather(&num_loc_rows, 1, MPI_LONG, proc_rows, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    if (proc_id == 0)
+    {
+        printf("\nRow distribution: [");
+
+        for (int p = 0; p < num_proc; p++)
+        {
+            printf("%ld ", proc_rows[p]);
+        }
+
+        printf("]\n\n");
+    }
+
+    mem_free<long>(proc_rows, num_proc);
+
     // Assemble FE matrices with boundaries removed
     HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &A_bc);
     HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
