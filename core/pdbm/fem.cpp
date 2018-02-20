@@ -185,6 +185,26 @@ void fem_matrices()
         idx_start_bc += 1;
     }
 
+    // Output row distribution
+    long num_loc_rows = idx_end_bc - idx_start_bc + 1;
+    long *proc_rows = mem_alloc<long>(num_proc);
+
+    MPI_Gather(&num_loc_rows, 1, MPI_LONG, proc_rows, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    if (proc_id == 0)
+    {
+        printf("\nRow distribution: [");
+
+        for (int p = 0; p < num_proc; p++)
+        {
+            printf("%ld ", proc_rows[p]);
+        }
+
+        printf("]\n\n");
+    }
+
+    mem_free<long>(proc_rows, num_proc);
+
     // Assemble FE matrices with boundaries removed
     HYPRE_IJMatrixCreate(MPI_COMM_WORLD, idx_start_bc, idx_end_bc, idx_start_bc, idx_end_bc, &A_bc);
     HYPRE_IJMatrixSetObjectType(A_bc, HYPRE_PARCSR);
@@ -441,6 +461,9 @@ void fem_matrices()
     HYPRE_IJVectorGetObject(Bd_bc, (void**) &Bd_fem);
 
     // Free memory
+    mem_free<int>(ranking_map, n_elem, n_x * n_y * n_z);
+    mem_free<long>(compression, num_loc_dofs);
+    mem_free<double>(Bd_sum, n_elem * n_x * n_y * n_z);
     mem_free<double>(q_r, n_quad, n_dim);
     mem_free<double>(q_w, n_quad);
     mem_free<int>(v_coord, pow(n_dim, 2), n_dim);
@@ -449,11 +472,8 @@ void fem_matrices()
     mem_free<double>(B_loc, n_dim + 1, n_dim + 1);
     mem_free<double>(J_xr, n_dim, n_dim);
     mem_free<double>(J_rx, n_dim, n_dim);
-    mem_free<double>(x_t, n_dim, n_dim);
+    mem_free<double>(x_t, n_dim, n_dim + 1);
     mem_free<double>(q_x, n_dim);
-    mem_free<long>(compression, num_loc_dofs);
-    mem_free<int>(ranking_map, n_elem, n_x * n_y * n_z);
-    mem_free<double>(Bd_sum, n_elem * n_x * n_y * n_z);
     mem_free<double>(Bd_gs, num_loc_dofs);
 }
 

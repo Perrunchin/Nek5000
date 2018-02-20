@@ -29,16 +29,17 @@ void set_amg_preconditioner_()
 
     // Set some parameters (See Reference Manual for more parameters)
     HYPRE_BoomerAMGSetMaxRowSum(amg_preconditioner, 1); // Don't check for maximum row sum
-    HYPRE_BoomerAMGSetCoarsenType(amg_preconditioner, 0); // 0 for CLJP, 6 for Falgout
-    HYPRE_BoomerAMGSetInterpType(amg_preconditioner, 0); // Interpolation type, 0 for classical modified interpolation
-    HYPRE_BoomerAMGSetPMaxElmts(amg_preconditioner, 0); // Maximum number of elements per row for interpolation
+    HYPRE_BoomerAMGSetCoarsenType(amg_preconditioner, 10); // 0 for CLJP, 6 for Falgout, 10, HMIS
+    HYPRE_BoomerAMGSetInterpType(amg_preconditioner, 6); // Interpolation type, 0 for classical modified interpolation, 6 for extended+i interpolation
+    HYPRE_BoomerAMGSetPMaxElmts(amg_preconditioner, 4); // Maximum number of elements per row for interpolation
     HYPRE_BoomerAMGSetAggNumLevels(amg_preconditioner, 0); // 0 for no-aggressive coarsening
     HYPRE_BoomerAMGSetStrongThreshold(amg_preconditioner, 0.25); // Strength threshold
     HYPRE_BoomerAMGSetMaxCoarseSize(amg_preconditioner, 50); // maximum number of rows in coarse level
     HYPRE_BoomerAMGSetRelaxType(amg_preconditioner, 3); // G-S/Jacobi hybrid relaxation, 3 means SOR
     HYPRE_BoomerAMGSetPrintLevel(amg_preconditioner, 3);  // print solve info + parameters
-    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 100); // maximum number of V-cycles
+    HYPRE_BoomerAMGSetMaxIter(amg_preconditioner, 1); // maximum number of V-cycles
     HYPRE_BoomerAMGSetTol(amg_preconditioner, 1e-7); // convergence tolerance
+    HYPRE_BoomerAMGSetSeqThreshold(amg_preconditioner, 5000); // aggregate to single processor when bellows 5000
 
     // Setup preconditioner
     HYPRE_BoomerAMGSetup(amg_preconditioner, A_fem, NULL, NULL);
